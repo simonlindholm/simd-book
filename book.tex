@@ -1,0 +1,248 @@
+\documentclass[openany]{book}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage{amsmath}
+% \usepackage{ctex} for Chinese characters, takes too long to compile for now
+
+\title{
+    Down With Constant Factors! \\
+    \large An introduction to SIMD and low-level optimization in competitive programming
+}
+\author{Simon Lindholm}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+
+\chapter{Introduction}
+only focus on integer instructions
+fun way of applying SIMD, not just for competitive programmers
+why not multithreading (simd is ``free performance'')
+goals:
+- optimizing when solution gets TLE
+- getting away with additional log factors
+- sqrt decomp
+- quadratic
+- having fun
+- useful outside of competitive programming
+only going to cover constant factors, mostly problem-independent
+
+\part{General Optimization Tips}
+\chapter{Workflow}
+- language
+- compiler flags (-O2, -Ofast, ASAN/UBSAN)
+- do the math
+- first make it work
+- algorithmic optimizations (pruning, breaking early, special cases, symmetry, shaving off factors of 2)
+- test locally. if it takes 20 seconds algorithmic optimizations are needed and you shouldn't submit
+- concentrate on hotspots. 100ms usually doesn't matter
+- profilers (gdb, perf flamecharts)
+- looking at assembly (-S -fno-asynchronous-unwind-tables or godbolt)
+\chapter{Input/output}
+- cin, cout
+- \verb@.sync_with_stdio(0)@
+- .tie(0)
+- scanf, printf
+- \verb@{get,put}char_unlocked@
+- custom IO
+- syscall overhead and variance between judges
+\chapter{The CPU pipeline}
+- latency, throughput
+- example: linked list vs vector iteration (computing a sum)
+- branch prediction
+- example: filtered sum vs ?:
+- instruction latencies/throughput: int arithmetic (addition/multiplication/division, smaller vs larger datatypes), float arithmetic (f32, f64), move, memory access
+\chapter{What can the compiler do for you?}
+- instruction scheduling
+- constant folding
+- LICM, CSE
+- limited alias analysis (\verb@__restrict__@)
+- inlining (-O2 vs -O3)
+- loop unrolling (pragma, and useless with modern processors because it's not the bottleneck)
+- autovectorization (-O3)
+- what can it not do? memory allocations, data formats, loop order (except icc), float associativity (unless -Ofast), modular arithmetic associativity
+- divisions by constant vs non-constant
+- example: factorial
+\chapter{Dealing with memory}
+- overhead of malloc (perf \& size)
+- overhead of free (\verb@exit(0)@)
+- vector vs array
+- \verb@vector<vector<vector<int>>>@ vs \verb@vector<vector<array<int, 2>>>@ vs \verb@array<vector<vector<int>>, 2>@
+- global variables
+- memory access (memory use matters, L1/L2/L3/RAM, indirection)
+- organizing memory, e.g. transposed matrices
+- example: matrix multiplication
+- example: dp with bad access order
+- reusing memory in DP
+\chapter{Example: dynamic programming}
+- starting with a memoized version
+- memoization: pros and cons
+- write 5-line python generator, \verb@./a.out <input | sha1sum@
+- call it in a loop
+- strip out memoization parts
+- extract out from function
+- transposing arrays
+- help out alias analysis?
+\chapter{Working with bits}
+- bit hacks (\url{https://graphics.stanford.edu/~seander/bithacks.html})
+- bitsets (\verb@_Find_first@, \verb@_Find_next@, \verb@count()@)
+- compiler intrinsics: \verb@__builtin_clzll@, \verb@popcountll@
+- example: ?? gauss elim?
+
+\part{SIMD}
+
+Assorted:
+- more pshufb
+- (FFT? nah)
+- exercises:
+ * quicksort/mergesort
+ * base64 encoding/decoding (tips: \verb@_mm_shuffle_epi8@, shifts, masks, compares, saturated arithmetic)
+
+\chapter{Introduction to SIMD}
+single instruction multiple data
+focus on x86
+intrinsics
+intrinsics guide
+manual assembly
+auto-vectorization, limitations thereof
+example: sum (+unrolling to avoid latency bound)
+look at asm
+auto-vectorizing
+pragmas
+SSE/AVX/AVX-512 (judge hardware, crashes)
+aligned memory (crashes, \verb@_mm_loadu_si128@)
+smaller datatypes
+performance
+what is simd good at
+- vertical operations
+what is it not good at
+- memory access
+- horizontal reduction
+memory layout
+
+\chapter{Reference}
+list of useful instructions for SSE, AVX, AVX-512 with latency/throughput
+missing instructions:
+- cross-lane shuffles
+- cross-lane shifts
+- dynamic shifts
+- int division
+- small-width operations (multiplication)
+- large-width operations (multiplication)
+
+\chapter{Example: Robots}
+\url{https://codeforces.com/contest/575/problem/I}
+% concepts: auto-vectorization, soa, small datatypes, tight inner loops
+$N \le 5000, Q \le 10^5$. TL 1.5s. Queries of 2 kinds:
+- \verb@1 d x y l@: add an axis-aligned triangle at $(x,y)$, oriented depending on $d \in \{1,2,3,4\}$
+- \verb@2 x y@: count how many triangles cover the point $(x, y)$
+naive first implementation runs in 10s
+unpredictable branches, \&\& -> \& gives 5s
+no auto-vectorization despite pragmas
+SoA and small data types, 0m1.748s
+look at asm and iterately improve
+finally 0m0.840s (0.710 with AVX2)
+manual SIMD for comparison, 0.8s
+
+\chapter{Example: Binomial Coefficients}
+% concepts: modulo, latency
+(power of two version from a private training camp)
+computing $\binom{n}{k} \pmod {2^{32}}$, $0 \le k \le n \le 10^{18}$
+(Lucas' theorem doesn't apply to prime powers)
+count powers of two
+decompose into odd factorials, overlapping intervals, periodic mod m
+latency
+simd
+auto-vectorization
+computing $\binom{n}{k} \pmod m$
+factor $m$, use CRT
+decomposition as above
+$\Pi = -1 \pmod{p^k}$ except for $p = 2^k, k \ge 3$ where $\Pi = 1 \pmod{2^k}$. Proof by Wilson and induction or Hensel lifting
+latency-reduced loop, slow with dynamic modulo
+Barrett reduction
+KACTL float modmul
+Montgomery multiplication (after processing powers of two as above)
+SIMD versions (modulo: no, barrett: no, float: yes, montgomery: yes)
+\url{https://gist.github.com/simonlindholm/51f88e9626408723cf906c6debd3814b}
+
+\chapter{Example: Fibonacci-ish II}
+% concepts: bitsets, using data structures, shuffles
+\url{https://codeforces.com/contest/633/problem/H}
+problem description. n,m,q <= 30'000, 5s TL. solve in omega(NQ) (265 ms doable)
+want to loop over all numbers in order, and process them only if relevant
+how to find relevant numbers:
+- loop over query range and mark
+- loop and check indices (a <= x < b)
+- branchless
+- bitset RMQ ... or segtree
+optimizing the segtree for memory and construction time, and thus perf
+shuffle based on bits (\verb@_mm_shuffle_epi8@)
+how to read bits from a bitset
+lookup tables for popcount using those bits
+using small data types, \verb@_mm_madd_epi16@
+
+\chapter{Example: Spelling Correction}
+% concepts: weird simd instructions, memory ordering, horizontal reductions, DP
+\url{https://kth.kattis.com/problems/kth.adk.spelling}
+fast input
+char -> byte
+transposed checks, no data structures
+easy pruning
+simd pruning (\verb@_mm_sad_epu8@)
+bitparallel edit distance
+simd edit distance, log reduction
+diagonal edit distance
+
+\chapter{Example: Counting on a Tree}
+% concepts: using data structures, counting memory, weird simd instructions, winning factors 2, optimism
+\url{https://www.hackerrank.com/contests/university-codesprint/challenges/counting-on-a-tree}
+$n \le 10^5, q \le 5\cdot 10^4$, TL 2s (passed in 0.73s), SSE4.1 available on judge
+rough math
+three parts to each query:
+1. walk the path between two nodes
+2. write down frequency counts
+3. dot product of frequency counts
+walking path:
+- pointer-chasing: incredibly slow
+- split path into smaller parts with power-of-two jumps; now decrease latency by following all paths in parallel. Still rather slow
+- HLD; decompose path in $O(log N)$ paths, each of which is consecutive in memory. Fast!
+writing down frequency counts: maaybe fast enough
+dot product: fast!
+try it! hard to optimize further, step 2 is a bottleneck
+alternative method: let's combine 1 and 2, and precompute the frequency counts for each node up to the root. Persistent tree
+Step 3: needs to compute (a+b-c-d)*(e+f-g-h), recursing down the tree
+make leaves big to eliminate that overhead
+memory will not fit in L1, and is thus a good proxy. $10^5 \cdot 5\cdot 10^4 \cdot 8 \cdot 4 / 2 = 80$ GB/s, too much
+small/large partitioning
+\verb@_mm_maddubs_epi16@
+handle easy cases (colors that occur once)
+same nodes in recursion
+$10^5 \cdot 5\cdot 10^4 \cdot 6 / 2 / 2 = 7.5$ GB/s
+optimism: halve that
+ran in 0.73s
+
+\chapter{Example: Everyone in the Name of Justice}
+% concepts: data arrangement, bitslicing, popcount
+% [Ynoi2014]人人本着正义之名; chinese text is slow to compile with xelatex and the ctex package
+\url{https://www.luogu.com.cn/problem/P5066}
+7 types of operations
+rough math
+shifts are slow (but try it anyway)
+counting bits:
+- shuffles
+- bitslicing (Harley-Seal)
+rearranging data
+accidental bottlenecks
+focus on the innermost loop
+L2->L1 idea
+minimizing reads/writes by synchronizing operations
+(looking at asm to find bad alias analysis)
+combining popcounts
+\url{https://gist.github.com/simonlindholm/0762dfb382249a1916a7f885183c84b5}
+\url{https://gist.github.com/simonlindholm/6a6561bbca9b80af2e46a148791bc53c}
+
+\end{document}
