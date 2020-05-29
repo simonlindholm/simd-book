@@ -89,8 +89,6 @@ ll solve(ll N, ll K, ll M) {
 		res = crt(res, prod, r, m);
 		prod *= m;
 	});
-	assert(prod == M);
-	assert(0 <= res && res < M);
 	return res;
 }
 

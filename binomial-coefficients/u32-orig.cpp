@@ -1,3 +1,4 @@
+// (code submitted during competition)
 #include <bits/stdc++.h>
 using namespace std;
 
