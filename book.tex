@@ -23,7 +23,10 @@
 % Dandan for AVX-512 and bouncing ideas
 % problemsetters
 % bunch of people for the float modmul
-% only gcc, measurements on i5-4200U (AVX2)
+
+% only gcc (pragmas + what judges use)
+% measurements on i5-4200U (old laptop, has AVX2)
+% repo with source code
 
 \title{
     Down With Constant Factors! \\
@@ -130,7 +133,7 @@ intrinsics
 intrinsics guide
 manual assembly
 auto-vectorization
-example: sum (+unrolling to avoid latency bound)
+example: sum (+unrolling to avoid latency-bound)
 look at asm
 auto-vectorizing: how to (pragmas), limitations
 SSE/AVX/AVX-512 (judge hardware, crashes)
@@ -184,13 +187,15 @@ This problem seems to call for some extension of Lucas' theorem to prime powers.
 \newcommand{\odd}[1]{#1_\text{odd}}
 \newcommand{\even}[1]{#1_\text{even}}
 
-We can't compute $N!$, $K!$ and $(N-K)!$ straight off modulo $2^{32}$ and then do modular division, because they will be divisible by large powers of two, and division by zero is impossible. Instead, let's take each factorial and write it as $x! = \odd{x}2^{\even{x}}$. Then
+We can't compute $N!$, $K!$ and $(N-K)!$ straight off modulo $2^{32}$ and then do modular division, because they will be divisible by large powers of two, and division by zero is impossible.
+Instead, let's take each factorial and write it as $x! = \odd{x}2^{\even{x}}$. Then
 \[
 \frac{N!}{K!(N-K)!} =
 \frac{\odd N}{\odd K \odd{(N-K)}} \cdot \mathlarger{2^{\even N - \even K - \even{(N-K)}}},
 \]
 
-and the $\odd x$ parts can be computed mod $2^{32}$ instead of requiring arbitrary precision integers. We can get formulas for $\odd x$ and $\even x$ by expanding $x!$ as follows: \\
+and the $\odd x$ parts can be computed mod $2^{32}$ instead of requiring arbitrary precision integers.
+We can get formulas for $\odd x$ and $\even x$ by expanding $x!$ as follows: \\
 \begin{tabular}{cccccccccc}
 $x!$&$=$&          &$1$& $\cdot 2$ &$\cdot 3$ &$\cdot 4$ &$\cdot 5$ & $\cdot 6$ & $\cdot \ldots$ \\
     &$=$&          &$1$&           &$\cdot 3$ &          &$\cdot 5$ &           & $\cdot \ldots$ \\
@@ -204,7 +209,12 @@ For $\odd x$, we get a decomposition into a number of odd double factorials $k!!
 
 As it turns out, $1 \cdot 3 \cdot \ldots \cdot (2^{32}-1) = 1 \pmod{2^{32}}$, so $k!! = (k \mod 2^{32})!! \pmod{2^{32}}$.
 
-Now, we could try to compute all the double factorials with bruteforce, but it would be a bit too costly -- there are up to $3 \cdot \log_2{10^{18}}$ of them. But we can be a bit smarter, by reusing parts of the products. Let's partition the numbers $1, 3, \dots, 2^{32}-1$ into intervals that affect the same double factorials. Then we get an amortized runtime of $2^{31}$ multiplications, which should be totally doable in 1 second. (Note that arithmetic mod $2^{32}$ is fast, because it can make use of integer overflow.) Here is how it looks in code:
+Now, we could try to compute all the double factorials with bruteforce, but it would be a bit too costly -- there are up to $3 \cdot \log_2{10^{18}}$ of them.
+But we can be a bit smarter, by reusing parts of the products.
+Let's partition the numbers $1, 3, \dots, 2^{32}-1$ into intervals that affect the same double factorials.
+Then we get an amortized runtime of $2^{31}$ multiplications, which should be totally doable in 1 second.
+(Note that arithmetic mod $2^{32}$ is fast, because it can make use of integer overflow.)
+Here is how it looks in code:
 
 \begin{lstlisting}
 typedef uint32_t u32;
@@ -252,12 +262,6 @@ u32 solve(ll N, ll K) {
 	res *= modpow(resdiv, (1LL << 31) - 1);
 	return res;
 }
-
-int main() {
-	ll N, K;
-	cin >> N >> K;
-	cout << solve(N, K) << endl;
-}
 \end{lstlisting}
 
 Running this locally on worst-case input (e.g. $n = 2^{59}-2$, $k$ randomly keyboard mashed, to trigger a loop over the full range $[1, 2^{32}-1]$) results in a time of 2.601s. Not great...
@@ -268,7 +272,13 @@ Let's add some auto-vectorization (SSE 4.1, to match the judge's hardware):
 #pragma GCC target ("sse4.1")
 \end{lstlisting}
 
-New time: 2.141s. That's better, but not good. What's going on? If we experiment locally by changing \verb@sse4.1@ to \verb@avx2@ it gives a time of 1.065s. This is exactly what we would expect if the code was auto-vectorized and the vector width doubled with AVX2. A hypothesis we can make from this is that the code \emph{was} auto-vectorized into operating on 4 u32's at once, but that the loop is completely latency bound, and the added latency of \verb@pmulld@ (\verb@_mm_mullo_epi32@) over \verb@imul@ (normal multiplication) compensated for the increased throughput. (Agner's instruction tables seem to agree with this hypothesis -- imul is listed as having 3 cycles of latency on Skylake, while pmulld has 10.) If that's the case, we should be able to make it throughput-bound and increase performance by keeping a bunch of simultaneous loop counters. Let's try it:
+New time: 2.141s. That's better, but not good. What's going on?
+If we experiment locally by changing \verb@sse4.1@ to \verb@avx2@ it gives a time of 1.065s.
+This is exactly what we would expect if the code was auto-vectorized and the vector width doubled with AVX2.
+A hypothesis we can make from this is that the code \emph{was} auto-vectorized into operating on 4 u32's at once, but that the loop is completely latency-bound, and the added latency of \verb@pmulld@ (\verb@_mm_mullo_epi32@) over \verb@imul@ (normal multiplication) compensated for the increased throughput.
+(Agner's instruction tables seem to agree with this hypothesis -- imul is listed as having 3 cycles of latency on Skylake, while pmulld has 10.)
+If that's the case, we should be able to make it throughput-bound and increase performance by keeping a bunch of simultaneous loop counters.
+Let's try it:
 
 \begin{lstlisting}
 const int PAR = 8;
@@ -284,7 +294,9 @@ for (; cur < ilim; cur++) {
 }
 \end{lstlisting}
 
-0.434s! That's better, and enough to get Accepted on the problem. With an \verb@avx2@ target pragma it goes down further to 0.225s. In fact, even with auto-vectorization disabled this trick helps performance, giving 0.853s.
+0.434s! That's better, and enough to get Accepted on the problem.
+With an \verb@avx2@ target pragma it goes down further to 0.225s.
+In fact, even with auto-vectorization disabled this trick helps performance, giving 0.853s.
 
 For fun we can also try writing the loop manually using intrinsics:
 \begin{lstlisting}
@@ -346,7 +358,9 @@ If $\alpha = 1$, Wilson's theorem says that $(p-1)! = -1 \pmod{p}$, and has an e
 For $p = 2$ we can compute the results for $\alpha = 2, 3$ by hand: $\alpha = 2$ gives a product $1 \cdot 3 = -1$, and $\alpha = 3$ gives $1 \cdot 3 \cdot 5 \cdot 7 = 1$. For larger $\alpha$ we can use the Wilson argument together with induction on the fact that $x^2 = 1$ has four solutions $1$, $-1$, $2^{\alpha-1} - 1$, $2^{\alpha-1} + 1$.
 
 For $p > 2$ we can solve $x^2 = 1 \pmod{p^\alpha}$ using Hensel lifting: a root $x$ to the polynomial mod $p$ lifts to exactly one corresponding root mod higher powers of $p$ since the derivative $2x$ is non-zero for $p > 2$. Hence, $\pm 1$ are the only roots to $x^2 = 1 \pmod{p^\alpha}$, and we can apply the Wilson argument.
-} so we can look only at ranges with upper bound less than $p^\alpha$. Here's an initial attempt:
+}
+so we can look only at ranges with upper bound less than $p^\alpha$.
+Here's an initial attempt:
 
 \begin{lstlisting}
 ll euclid(ll a, ll b, ll &x, ll &y) {
@@ -438,23 +452,85 @@ void test() {
 		else binom[n][k] = (binom[n-1][k-1] + binom[n-1][k]) % m;
 		assert(solve(n, k, m) == binom[n][k]);
 	}
-	exit(0);
-}
-
-int main(int argc, char** argv) {
-	if (argc > 1 && argv[1] == string("--test")) test();
-	ll N, K, M;
-	cin >> N >> K >> M;
-	cout << solve(N, K, M) << endl;
 }
 \end{lstlisting}
 
 Runtime is an abysmal 20.839s, but it works.
+The innermost loop here looks like
+\begin{lstlisting}
+for (; cur < lim; cur++) {
+  if (cur % p != 0)
+    prod = prod * cur % mod;
+}
+\end{lstlisting}
 
-latency-reduced loop, slow with dynamic modulo
-Barrett reduction
-KACTL float modmul
-Montgomery multiplication (after processing powers of two as above)
+There are two things that are slow: the divisibility check by \texttt{p}, and the modular multiplication.
+The former would be easy to eliminate by turning the loop into two nested loops, with the innermost looping from $1$ to $p-1$, however, this will make the code messier when we start applying SIMD.
+Instead, let's use another trick:
+
+\begin{lstlisting}
+u32 pinv = (u32)modpow(p, (1LL << 31) - 1, 1LL << 32);
+u32 plim = 0xFFFFFFFF / p;
+...
+
+if (p == 2) {
+  u32 prod2 = ... product mod 2^32 as before
+  prod = prod2 % mod;
+} else {
+  for (; cur < lim; cur++) {
+    if ((u32)cur * pinv > plim)
+      prod = prod * cur % mod;
+  }
+}
+\end{lstlisting}
+
+If \verb@cur@ is divisible by $p$, dividing will result in a number in the range $[0, (2^{32}-1) / p]$.
+We can compute this result by multiplying by the modular inverse of $p \pmod{2^{32}}$.
+On the other hand, if \verb@cur@ is not divisible by $p$, multiplying by the modular inverse of $p$ cannot result in a number in that range, since that multiplication is invertible and already has a pre-image (given by multiplication by $p$).
+Hence, \verb@cur % p == 0@ can be replaced by \verb@(u32)cur * pinv <= plim@, multiplication being much cheaper than a modulo.
+
+We do need to be careful to treat $p = 2$ specially, since 2 is not invertible mod $2^{32}$.
+However, this special-casing will be needed later on anyway, when we start looking into optimizing the modular multiplication.
+
+Performance-wise, this doesn't make much of a difference -- we go from 20.8 seconds to 19.3. It seems likely that we are latency-bound.
+
+To avoid the latency bottleneck, let's do as before and try to use multiple accumulators:
+
+\begin{lstlisting}
+const int PAR = 2;
+ll subprod[PAR] = {1,1};
+while (cur + PAR <= lim) {
+	rep(i,0,PAR) {
+		if ((u32)cur * pinv > plim)
+			subprod[i] = subprod[i] * cur % mod;
+		cur++;
+	}
+}
+rep(i,0,PAR) prod = prod * subprod[i] % mod;
+for (; cur < lim; cur++) {
+	if ((u32)cur * pinv > plim)
+		prod = prod * cur % mod;
+}
+\end{lstlisting}
+
+This gives us a runtime of 11.848s, and making the divisibility check branchless by doing
+\begin{lstlisting}
+subprod[i] * ((u32)cur * pinv > plim ? cur : 1) % mod;
+\end{lstlisting}
+improves it further to 10.933s (10.391s with no divisibility check at all).
+Raising \verb@PAR@ further makes performance worse, and turning on -O3 makes no difference.
+
+So... where do we go from here?
+We can't turn to SIMD, because there's no SIMD integer division or modulo instruction.
+Well, what we \emph{can} do is roll our own modular multiplication.
+% There a couple of different techniques for this, usually relying on the modulus remaining constant over many operations.
+
+\subsection*{Barrett reduction}
+One way of
+
+\subsection*{Montgomery multiplication}
+\subsection*{Floating-point modmul}
+
 SIMD versions (modulo: no, barrett: no, float: yes, montgomery: yes)
 \url{https://gist.github.com/simonlindholm/51f88e9626408723cf906c6debd3814b}
 
