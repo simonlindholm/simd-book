@@ -3,7 +3,14 @@
 \usepackage[utf8]{inputenc}
 \usepackage{hyperref}
 \usepackage{amsmath}
+\usepackage{framed}
+\usepackage{relsize}
 % \usepackage{ctex} for Chinese characters, takes too long to compile for now
+
+% Thanks to:
+% Dandan for AVX-512 and bouncing ideas
+% problemsetters
+% bunch of people for the float modmul
 
 \title{
     Down With Constant Factors! \\
@@ -150,11 +157,43 @@ manual SIMD for comparison, 0.8s
 
 \chapter{Example: Binomial Coefficients}
 % concepts: modulo, latency
-(power of two version from a private training camp)
-computing $\binom{n}{k} \pmod {2^{32}}$, $0 \le k \le n \le 10^{18}$
-(Lucas' theorem doesn't apply to prime powers)
-count powers of two
-decompose into odd factorials, overlapping intervals, periodic mod m
+\begin{framed}
+\noindent
+(Russian training camp) Given $N, K$ ($0 \le K \le N \le 10^{18}$), compute
+\[
+\binom N K = \frac{N!}{K!(N-K)!} \pmod {2^{32}}.
+\]
+Time limit: 1 second.
+\end{framed}
+This problem seems to call for some extension of Lucas' theorem to prime powers... but let's ignore that and instead focus our attention on how to compute factorials quickly.
+
+\newcommand{\odd}[1]{#1_\text{odd}}
+\newcommand{\even}[1]{#1_\text{even}}
+
+We can't compute $N!$, $K!$ and $(N-K)!$ straight off modulo $2^{32}$ and then do modular division, because they will be divisible by large powers of two, and division by zero is impossible. Instead, let's take each factorial and write it as $x! = \odd{x}2^{\even{x}}$. Then
+\[
+\frac{N!}{K!(N-K)!} =
+\frac{\odd N}{\odd K \odd{(N-K)}} \cdot \mathlarger{2^{\even N - \even K - \even{(N-K)}}},
+\]
+
+and the $\odd x$ parts can be computed mod $2^{32}$ instead of requiring arbitrary precision integers. We can get formulas for $\odd x$ and $\even x$ by expanding $x!$ as follows: \\
+\begin{tabular}{cccccccccc}
+$x!$&$=$&          &$1$& $\cdot 2$ &$\cdot 3$ &$\cdot 4$ &$\cdot 5$ & $\cdot 6$ & $\cdot \ldots$ \\
+    &$=$&          &$1$&           &$\cdot 3$ &          &$\cdot 5$ &           & $\cdot \ldots$ \\
+    &   &$\cdot 2$(&   & $1$       &          &          &          & $\cdot 3$ & $\cdot \ldots$)\\
+    &   &$\cdot 4$(&   &           &          &  $1$     &          &           & $\cdot \ldots$)\\
+    &   &$\cdot \ldots$ &
+\end{tabular}
+\\
+$\even x$ gets an easy formula: $\sum_{k=1}^\infty \lfloor x / 2^k \rfloor$.
+For $\odd x$, we get a decomposition into a number of odd double factorials $k!! = 1 \cdot 3 \cdot 5 \cdot \ldots \cdot k$.
+
+As it turns out, $1 \cdot 3 \cdot \ldots \cdot (2^{32}-1) = 1 \pmod{2^{32}}$, so $k!! = (k \mod 2^{32})!! \pmod{2^{32}}$.
+
+Now, we could try to compute all the double factorials with bruteforce, but it would be a bit too costly -- there are up to $3 \cdot \log_2{10^{18}}$ of them. But we can be a bit smarter, by reusing parts of the products. Let's partition the numbers $1, 3, \dots, 2^{32}-1$ into intervals that affect the same double factorials. Then we get an amortized runtime of $2^{31}$ multiplications, which should be totally doable in 1 second. Here is how it looks in code:
+
+
+
 latency
 simd
 auto-vectorization
