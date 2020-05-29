@@ -3,14 +3,27 @@
 \usepackage[utf8]{inputenc}
 \usepackage{hyperref}
 \usepackage{amsmath}
-\usepackage{framed}
-\usepackage{relsize}
-% \usepackage{ctex} for Chinese characters, takes too long to compile for now
+\usepackage{framed} % frames around example problems
+\usepackage{relsize} % larger math font size in one place
+\usepackage{listings} % source code listings
+\usepackage{courier} % bold monospace
+% \usepackage{ctex} % Chinese characters, takes too long to compile for now
+
+% lstlisting settings:
+\lstset{language=C++}
+\lstset{morekeywords={alignas,alignof}}
+\lstset{showstringspaces=false}
+\lstset{breaklines=true}
+\lstset{tabsize=2}
+\lstset{frame=single}
+\lstset{basicstyle=\small\ttfamily} % or \footnotesize?
+% \lstset{commentstyle=\normalfont\itshape}
 
 % Thanks to:
 % Dandan for AVX-512 and bouncing ideas
 % problemsetters
 % bunch of people for the float modmul
+% only gcc, measurements on i5-4200U (AVX2)
 
 \title{
     Down With Constant Factors! \\
@@ -62,6 +75,7 @@ only going to cover constant factors, mostly problem-independent
 - example: linked list vs vector iteration (computing a sum)
 - branch prediction
 - example: filtered sum vs ?:
+- register pressure
 - instruction latencies/throughput: int arithmetic (addition/multiplication/division, smaller vs larger datatypes), float arithmetic (f32, f64), move, memory access
 \chapter{What can the compiler do for you?}
 - instruction scheduling
@@ -70,7 +84,7 @@ only going to cover constant factors, mostly problem-independent
 - limited alias analysis (\verb@__restrict__@)
 - inlining (-O2 vs -O3)
 - loop unrolling (pragma, and useless with modern processors because it's not the bottleneck)
-- autovectorization (-O3)
+- autovectorization (O3 and target pragmas)
 - what can it not do? memory allocations, data formats, loop order (except icc), float associativity (unless -Ofast), modular arithmetic associativity
 - divisions by constant vs non-constant
 - example: factorial
@@ -115,11 +129,10 @@ focus on x86
 intrinsics
 intrinsics guide
 manual assembly
-auto-vectorization, limitations thereof
+auto-vectorization
 example: sum (+unrolling to avoid latency bound)
 look at asm
-auto-vectorizing
-pragmas
+auto-vectorizing: how to (pragmas), limitations
 SSE/AVX/AVX-512 (judge hardware, crashes)
 aligned memory (crashes, \verb@_mm_loadu_si128@)
 smaller datatypes
@@ -157,6 +170,7 @@ manual SIMD for comparison, 0.8s
 
 \chapter{Example: Binomial Coefficients}
 % concepts: modulo, latency
+\section{Modulo powers of two}
 \begin{framed}
 \noindent
 (Russian training camp) Given $N, K$ ($0 \le K \le N \le 10^{18}$), compute
@@ -190,17 +204,253 @@ For $\odd x$, we get a decomposition into a number of odd double factorials $k!!
 
 As it turns out, $1 \cdot 3 \cdot \ldots \cdot (2^{32}-1) = 1 \pmod{2^{32}}$, so $k!! = (k \mod 2^{32})!! \pmod{2^{32}}$.
 
-Now, we could try to compute all the double factorials with bruteforce, but it would be a bit too costly -- there are up to $3 \cdot \log_2{10^{18}}$ of them. But we can be a bit smarter, by reusing parts of the products. Let's partition the numbers $1, 3, \dots, 2^{32}-1$ into intervals that affect the same double factorials. Then we get an amortized runtime of $2^{31}$ multiplications, which should be totally doable in 1 second. Here is how it looks in code:
+Now, we could try to compute all the double factorials with bruteforce, but it would be a bit too costly -- there are up to $3 \cdot \log_2{10^{18}}$ of them. But we can be a bit smarter, by reusing parts of the products. Let's partition the numbers $1, 3, \dots, 2^{32}-1$ into intervals that affect the same double factorials. Then we get an amortized runtime of $2^{31}$ multiplications, which should be totally doable in 1 second. (Note that arithmetic mod $2^{32}$ is fast, because it can make use of integer overflow.) Here is how it looks in code:
 
+\begin{lstlisting}
+typedef uint32_t u32;
 
+u32 modpow(u32 a, ll e) {
+	if (e == 0) return 1;
+	u32 x = modpow(a * a, e >> 1);
+	return e & 1 ? x * a : x;
+}
 
-latency
-simd
-auto-vectorization
-computing $\binom{n}{k} \pmod m$
-factor $m$, use CRT
-decomposition as above
-$\Pi = -1 \pmod{p^k}$ except for $p = 2^k, k \ge 3$ where $\Pi = 1 \pmod{2^k}$. Proof by Wilson and induction or Hensel lifting
+u32 solve(ll N, ll K) {
+	ll trailingZeroes = 0;
+	map<u32, int> ivs;
+	int accMult = 0;
+	rep(i,0,3) {
+		ll x = (i == 0 ? N : i == 1 ? K : N-K);
+		int mult = (i == 0 ? 1 : -1);
+		while (x > 0) {
+			// Include the product (1 * 3 * ... * (x % 2^32))
+			// in the answer, 'mult' times.
+			ivs[(u32)x + 1] += mult;
+			accMult += mult;
+			x /= 2;
+			trailingZeroes += x * mult;
+		}
+	}
+
+	u32 cur = 0, res = 1, resdiv = 1;
+	for (auto pa : ivs) {
+		u32 lim = pa.first, ilim = lim / 2;
+		// The odd numbers in the range [last lim, lim) get
+		// included 'accMult' times in the answer -- 'pa.second'
+		// times for the interval ending at 'lim', and also for
+		// all larger intervals. We divide the loop counter by 2
+		// to avoid potential overflows.
+		u32 prod = 1;
+		for (; cur < ilim; cur++)
+			prod *= cur * 2 + 1;
+		if (accMult > 0) res *= modpow(prod, accMult);
+		else resdiv *= modpow(prod, -accMult);
+		accMult -= pa.second;
+	}
+
+	res *= modpow(2, trailingZeroes);
+	res *= modpow(resdiv, (1LL << 31) - 1);
+	return res;
+}
+
+int main() {
+	ll N, K;
+	cin >> N >> K;
+	cout << solve(N, K) << endl;
+}
+\end{lstlisting}
+
+Running this locally on worst-case input (e.g. $n = 2^{59}-2$, $k$ randomly keyboard mashed, to trigger a loop over the full range $[1, 2^{32}-1]$) results in a time of 2.601s. Not great...
+
+Let's add some auto-vectorization (SSE 4.1, to match the judge's hardware):
+\begin{lstlisting}
+#pragma GCC optimize ("O3")
+#pragma GCC target ("sse4.1")
+\end{lstlisting}
+
+New time: 2.141s. That's better, but not good. What's going on? If we experiment locally by changing \verb@sse4.1@ to \verb@avx2@ it gives a time of 1.065s. This is exactly what we would expect if the code was auto-vectorized and the vector width doubled with AVX2. A hypothesis we can make from this is that the code \emph{was} auto-vectorized into operating on 4 u32's at once, but that the loop is completely latency bound, and the added latency of \verb@pmulld@ (\verb@_mm_mullo_epi32@) over \verb@imul@ (normal multiplication) compensated for the increased throughput. (Agner's instruction tables seem to agree with this hypothesis -- imul is listed as having 3 cycles of latency on Skylake, while pmulld has 10.) If that's the case, we should be able to make it throughput-bound and increase performance by keeping a bunch of simultaneous loop counters. Let's try it:
+
+\begin{lstlisting}
+const int PAR = 8;
+u32 subprod[PAR] = {1,1,1,1,1,1,1,1};
+u32 cur2 = cur * 2 + 1;
+for (; cur + PAR < ilim; cur += PAR, cur2 += PAR*2) {
+	rep(i,0,PAR) subprod[i] *= cur2 + 2*i;
+}
+u32 prod = 1;
+rep(i,0,PAR) prod *= subprod[i];
+for (; cur < ilim; cur++) {
+	prod *= cur * 2 + 1;
+}
+\end{lstlisting}
+
+0.434s! That's better, and enough to get Accepted on the problem. With an \verb@avx2@ target pragma it goes down further to 0.225s. In fact, even with auto-vectorization disabled this trick helps performance, giving 0.853s.
+
+For fun we can also try writing the loop manually using intrinsics:
+\begin{lstlisting}
+#pragma GCC optimize ("unroll-loops")
+typedef __m128i M;
+...
+
+const int PAR = 8;
+M madd = _mm_set1_epi32(PAR * 8);
+M msubprod[PAR], mcur2[PAR];
+rep(i,0,PAR) {
+	msubprod[i] = _mm_set1_epi32(1);
+	mcur2[i] = _mm_setr_epi32(
+	    2*cur + 8*i + 1, 2*cur + 8*i + 3,
+	    2*cur + 8*i + 5, 2*cur + 8*i + 7);
+}
+for (; cur + PAR * 4 < ilim; cur += PAR * 4) {
+	rep(i,0,PAR) {
+		msubprod[i] = _mm_mullo_epi32(msubprod[i], mcur2[i]);
+		mcur2[i] = _mm_add_epi32(mcur2[i], madd);
+	}
+}
+u32 prod = 1;
+union {
+	M mprod;
+	u32 parts[4];
+} u;
+u.mprod = _mm_set1_epi32(1);
+rep(i,0,PAR) u.mprod = _mm_mullo_epi32(u.mprod, msubprod[i]);
+rep(i,0,4) prod *= u.parts[i];
+for (; cur < ilim; cur++) {
+	prod *= cur * 2 + 1;
+}
+\end{lstlisting}
+
+This gives a runtime of 0.442s; roughly the same as auto-vectorization.
+
+\section{Modulo arbitrary numbers}
+
+Let's make life more difficult on ourselves.
+
+\begin{framed}
+\noindent
+Given $N, K, M$ ($0 \le K \le N \le 10^{18}$, $1 \le M \le 10^9$), compute
+\[
+\binom N K = \frac{N!}{K!(N-K)!} \pmod {M}.
+\]
+Time limit: 1 second.
+\end{framed}
+
+Our approach to this will be similar to that of powers of two.
+We can start by factoring $M = \prod p^\alpha$, and solve the problem modulo each prime power, piecing the results together using the Chinese remainder theorem.
+For each prime power $p^\alpha$, we decompose $N!$, $K!$ and $(N-K)!$ into powers of $p$ and products of ranges $[1, k]$ with numbers divisible by $p$ excluded.
+The product of a whole interval $[1, p^\alpha]$ is $1$ if $p = 2, \alpha \ge 3$, else $-1$,\footnote{
+This isn't really necessary to the implementation, since we could just as well compute the product of a whole interval using a brute-force loop. But it's a fun excuse to do math.
+
+If $\alpha = 1$, Wilson's theorem says that $(p-1)! = -1 \pmod{p}$, and has an easy proof: rearrange the product $1 \cdot 2 \cdot \ldots \cdot (p-1)$ to group $x$ together with $x^{-1}$; this will get rid of all factors except the ones that are their own inverse. Solving $x = x^{-1}$, or equivalently $x^2 = 1$, yields just two solutions $x = \pm 1$, and so $(p-1)! = 1 \cdot (-1) = -1\pmod{p}$. An easy way of seeing that there aren't more solutions to $x^2 = 1$ is that a degree two polynomial can only have two roots.
+
+For $p = 2$ we can compute the results for $\alpha = 2, 3$ by hand: $\alpha = 2$ gives a product $1 \cdot 3 = -1$, and $\alpha = 3$ gives $1 \cdot 3 \cdot 5 \cdot 7 = 1$. For larger $\alpha$ we can use the Wilson argument together with induction on the fact that $x^2 = 1$ has four solutions $1$, $-1$, $2^{\alpha-1} - 1$, $2^{\alpha-1} + 1$.
+
+For $p > 2$ we can solve $x^2 = 1 \pmod{p^\alpha}$ using Hensel lifting: a root $x$ to the polynomial mod $p$ lifts to exactly one corresponding root mod higher powers of $p$ since the derivative $2x$ is non-zero for $p > 2$. Hence, $\pm 1$ are the only roots to $x^2 = 1 \pmod{p^\alpha}$, and we can apply the Wilson argument.
+} so we can look only at ranges with upper bound less than $p^\alpha$. Here's an initial attempt:
+
+\begin{lstlisting}
+ll euclid(ll a, ll b, ll &x, ll &y) {
+	if (b) { ll d = euclid(b, a % b, y, x);
+		return y -= a/b * x, d; }
+	return x = 1, y = 0, a;
+}
+
+ll crt(ll a, ll m, ll b, ll n) {
+	if (n > m) swap(a, b), swap(m, n);
+	ll x, y, g = euclid(m, n, x, y);
+	assert((a - b) % g == 0); // else no solution
+	x = (b - a) % n * x % n / g * m + a;
+	return x < 0 ? x + m*n/g : x;
+}
+
+template<class F>
+void factor(ll n, F f) {
+	for (ll p = 2; p*p <= n; p++) {
+		int a = 0;
+		while (n % p == 0) n /= p, a++;
+		if (a > 0) f(p, a);
+	}
+	if (n > 1) f(n, 1);
+}
+
+ll modpow(ll a, ll e, ll m) {
+	if (e == 0) return 1;
+	ll x = modpow(a * a % m, e >> 1, m);
+	return e & 1 ? x * a : x;
+}
+
+// N choose K modulo p^a
+ll solve(ll N, ll K, int p, int a) {
+	int mod = 1, acc = 0;
+	rep(i,0,a) mod *= p;
+	ll trailingZeroes = 0, res = 1, resdiv = 1;
+	map<int, int> ivs;
+	rep(i,0,3) {
+		ll x = (i == 0 ? N : i == 1 ? K : N-K);
+		int mult = (i == 0 ? 1 : -1);
+		while (x > 0) {
+			// Include the product (1 * 2 * ... * x) in the answer,
+			// 'mult' times, with numbers divisible by p excluded.
+			ll lim = x + 1;
+			ivs[(int)(lim % mod)] += mult;
+			if (lim / mod % 2 == 1 && (mod == 4 || p > 2))
+				res *= -1;
+			acc += mult;
+			x /= p;
+			trailingZeroes += x * mult;
+		}
+	}
+
+	int cur = 1;
+	for (auto pa : ivs) {
+		int lim = pa.first;
+		ll prod = 1;
+		for (; cur < lim; cur++) {
+			if (cur % p != 0)
+				prod = prod * cur % mod;
+		}
+		if (acc > 0) res = res * modpow(prod, acc, mod) % mod;
+		else resdiv = resdiv * modpow(prod, -acc, mod) % mod;
+		acc -= pa.second;
+	}
+
+	res = res * modpow(p, trailingZeroes, mod) % mod;
+	res = res * modpow(resdiv, mod - mod/p - 1, mod) % mod;
+	return res;
+}
+
+// N choose K modulo M
+ll solve(ll N, ll K, ll M) {
+	ll res = 0, prod = 1;
+	factor(M, [&](ll p, int a) {
+		ll r = solve(N, K, (int)p, a), m = 1;
+		rep(i,0,a) m *= p;
+		res = crt(res, prod, r, m);
+		prod *= m;
+	});
+	return res;
+}
+
+void test() {
+	vector<vector<int>> binom(100, vector<int>(100, -1));
+	rep(m,1,100) rep(n,0,100) rep(k,0,n+1) {
+		if (k == 0 || k == n) binom[n][k] = 1 % m;
+		else binom[n][k] = (binom[n-1][k-1] + binom[n-1][k]) % m;
+		assert(solve(n, k, m) == binom[n][k]);
+	}
+	exit(0);
+}
+
+int main(int argc, char** argv) {
+	if (argc > 1 && argv[1] == string("--test")) test();
+	ll N, K, M;
+	cin >> N >> K >> M;
+	cout << solve(N, K, M) << endl;
+}
+\end{lstlisting}
+
+Runtime is an abysmal 20.839s, but it works.
+
 latency-reduced loop, slow with dynamic modulo
 Barrett reduction
 KACTL float modmul
