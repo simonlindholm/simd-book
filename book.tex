@@ -134,6 +134,7 @@ intrinsics guide
 manual assembly
 auto-vectorization
 example: sum (+unrolling to avoid latency-bound)
+includes
 look at asm
 auto-vectorizing: how to (pragmas), limitations
 SSE/AVX/AVX-512 (judge hardware, crashes)
@@ -456,7 +457,7 @@ void test() {
 \end{lstlisting}
 
 Runtime is an abysmal 20.839s, but it works.
-The innermost loop here looks like
+Let us focus on the innermost loop:
 \begin{lstlisting}
 for (; cur < lim; cur++) {
   if (cur % p != 0)
@@ -469,7 +470,7 @@ The former would be easy to eliminate by turning the loop into two nested loops,
 Instead, let's use another trick:
 
 \begin{lstlisting}
-u32 pinv = (u32)modpow(p, (1LL << 31) - 1, 1LL << 32);
+u32 pinv = (u32) modpow(p, (1LL << 31) - 1, 1LL << 32);
 u32 plim = 0xFFFFFFFF / p;
 ...
 
@@ -487,14 +488,12 @@ if (p == 2) {
 If \verb@cur@ is divisible by $p$, dividing will result in a number in the range $[0, (2^{32}-1) / p]$.
 We can compute this result by multiplying by the modular inverse of $p \pmod{2^{32}}$.
 On the other hand, if \verb@cur@ is not divisible by $p$, multiplying by the modular inverse of $p$ cannot result in a number in that range, since that multiplication is invertible and already has a pre-image (given by multiplication by $p$).
-Hence, \verb@cur % p == 0@ can be replaced by \verb@(u32)cur * pinv <= plim@, multiplication being much cheaper than a modulo.
+Hence, \verb@cur % p == 0@ can be replaced by \verb@(u32)cur * pinv <= plim@, multiplication being a much cheaper operation than modulo.
 
 We do need to be careful to treat $p = 2$ specially, since 2 is not invertible mod $2^{32}$.
 However, this special-casing will be needed later on anyway, when we start looking into optimizing the modular multiplication.
 
-Performance-wise, this doesn't make much of a difference -- we go from 20.8 seconds to 19.3. It seems likely that we are latency-bound.
-
-To avoid the latency bottleneck, let's do as before and try to use multiple accumulators:
+Performance-wise, this doesn't make much of a difference -- we go from 20.8 seconds to 19.3. It seems likely that we are latency-bound. To avoid this latency bottleneck, let's do as before and use multiple accumulators:
 
 \begin{lstlisting}
 const int PAR = 2;
@@ -513,7 +512,7 @@ for (; cur < lim; cur++) {
 }
 \end{lstlisting}
 
-This gives us a runtime of 11.848s, and making the divisibility check branchless by doing
+This gives us a (still pretty awful) runtime of 11.848s. Making the divisibility check branchless by doing
 \begin{lstlisting}
 subprod[i] * ((u32)cur * pinv > plim ? cur : 1) % mod;
 \end{lstlisting}
@@ -526,10 +525,65 @@ Well, what we \emph{can} do is roll our own modular multiplication.
 % There a couple of different techniques for this, usually relying on the modulus remaining constant over many operations.
 
 \subsection*{Barrett reduction}
-One way of
+One way of doing modular reduction quickly is by using Barrett reduction.
+The way it works is by writing $a \% b = a - \lfloor a / b \rfloor b$, and approximately computing the value of $\lfloor a / b \rfloor$ as $\lfloor (\lfloor (2^{64} - 1) / b \rfloor \cdot a) / 2^{64} \rfloor$.
+We can then apply a final correction if the resulting approximate value of $a \% b$ is outside the range $[0, b)$.
+Since $b =$ \verb@mode@ will be constant over many multiplications, we can precompute the value of $\lfloor (2^{64} - 1) / b \rfloor$, turning the work needed for a single modular reduction into just two multiplications, a subtraction and a range correction.
+\begin{lstlisting}
+typedef uint64_t u64;
+typedef __uint128_t u128;
+struct Barrett {
+	u64 b, m;
+	Barrett(u64 b) : b(b), m(-1ULL / b) {}
+	u64 reduce(u64 a) {
+		u64 q = (u64)((u128(m) * a) >> 64), r = a - q * b;
+		return r - b * (r >= b);
+	}
+};
+\end{lstlisting}
+
+Note that while we appear to use 128-bit arithmetic in the \verb@reduce@ function, which seems slow, the x86 instruction set actually has an instruction for \mbox{$64*64\rightarrow128$} bit multiplication, making the computation of \verb@q@ into a single instruction.
+(Other instruction sets commonly also have this sort of operation -- it's useful for implementing arbitrary precision integers.)
+
+We can now rewrite the loop:
+\begin{lstlisting}
+Barrett ba(mod);
+...
+
+const int PAR = 16;
+u64 subprod[PAR];
+rep(i,0,PAR) subprod[i] = 1;
+while (cur + PAR <= lim) {
+	rep(j,0,PAR) {
+		u64 cur2 = (u32)cur * pinv > plim ? cur : 1;
+		subprod[j] = ba.reduce(subprod[j] * cur2);
+		cur++;
+	}
+}
+rep(i,0,PAR) prod = ba.reduce(prod * subprod[i]);
+for (; cur < lim; cur++) {
+	u64 cur2 = (u32)cur * pinv > plim ? cur : 1;
+	prod = ba.reduce(prod * cur2);
+}
+\end{lstlisting}
+This runs in 2.541s, quite a lot better than before! As a side note, Barrett reduction corresponds roughly to what compilers do to optimize \verb@a % b@ where \verb@b@ is a compile-time constant.
+
+\subsection*{Relaxed Barrett reduction}
+The step in the Barrett reduction where we reduce $a$ into $[0, b)$ is nice for giving an answer in canonical form, but it is a bit unnecessarily slow. If we accept working with numbers in the range $[0, 2b)$, we can skip that part and do a reduction only at the end:
+\begin{lstlisting}
+u64 reduce(u64 a) {
+	return a - (u64)((u128(m) * a) >> 64) * b;
+}
+...
+
+prod %= mod;
+\end{lstlisting}
+1.746s! Nice. In reference to the side note from before, this is actually \emph{faster} than what the compiler would have produced with the naive version if \verb@mod@ was constant, which is an impressive feat.
+
+\subsection*{Floating-point modmul}
+
 
 \subsection*{Montgomery multiplication}
-\subsection*{Floating-point modmul}
 
 SIMD versions (modulo: no, barrett: no, float: yes, montgomery: yes)
 \url{https://gist.github.com/simonlindholm/51f88e9626408723cf906c6debd3814b}

@@ -29,14 +29,22 @@ int modmul2(int a, int b, int M) {
 	return (int)ret;
 }
 
-typedef unsigned long long ull;
-typedef __uint128_t L;
-struct FastMod {
-	ull b, m;
-	FastMod(ull b) : b(b), m(ull((L(1) << 64) / b)) {}
-	ull reduce(ull a) {
-		ull q = (ull)((L(m) * a) >> 64), r = a - q * b;
-		return r >= b ? r - b : r;
+typedef uint64_t u64;
+typedef __uint128_t u128;
+struct Barrett {
+	u64 b, m;
+	Barrett(u64 b) : b(b), m(-1ULL / b) {}
+	u64 reduce(u64 a) {
+		u64 q = (u64)((u128(m) * a) >> 64), r = a - q * b;
+		return r - (r >= b) * b;
+	}
+};
+
+struct RelaxedBarrett {
+	u64 b, m;
+	RelaxedBarrett(u64 b) : b(b), m(-1ULL / b) {}
+	u64 reduce(u64 a) {
+		return a - (u64)((u128(m) * a) >> 64) * b;
 	}
 };
 
@@ -228,24 +236,43 @@ int main(int argc, char** argv) {
 		cout << prod << endl;
 	}
 	else if (method == 7) {
-		// Barrett reduction. 1.732s.
+		// Barrett reduction. 1.637s.
 		const int PAR = 8;
-		FastMod fm(M);
-		ull prods[PAR];
+		Barrett ba(M);
+		u64 prods[PAR];
 		rep(i,0,PAR) prods[i] = 1;
 		int i = 1;
 		for (; i + PAR <= M;) {
 			rep(j,0,PAR)
-				prods[j] = fm.reduce(prods[j] * i), i++;
+				prods[j] = ba.reduce(prods[j] * i), i++;
 		}
-		ull prod = 1;
-		rep(i,0,PAR) prod = fm.reduce(prod * prods[i]);
+		u64 prod = 1;
+		rep(i,0,PAR) prod = ba.reduce(prod * prods[i]);
 		while (i < M) {
-			prod = fm.reduce(prod * i), i++;
+			prod = ba.reduce(prod * i), i++;
 		}
 		cout << prod << endl;
 	}
 	else if (method == 8) {
+		// Relaxed Barrett reduction. 1.195s.
+		const int PAR = 8;
+		RelaxedBarrett ba(M);
+		u64 prods[PAR];
+		rep(i,0,PAR) prods[i] = 1;
+		int i = 1;
+		for (; i + PAR <= M;) {
+			rep(j,0,PAR)
+				prods[j] = ba.reduce(prods[j] * i), i++;
+		}
+		u64 prod = 1;
+		rep(i,0,PAR) prod = ba.reduce(prod * prods[i]);
+		while (i < M) {
+			prod = ba.reduce(prod * i), i++;
+		}
+		prod %= M;
+		cout << prod << endl;
+	}
+	else if (method == 9) {
 		// Montgomery multiplication. 1.668s.
 		const int PAR = 8;
 		Mont mont(M);
@@ -265,7 +292,7 @@ int main(int argc, char** argv) {
 		// form numbers that got multiplied in. But that's 1, so no need.
 		cout << mont.get(prod) << endl;
 	}
-	else if (method == 9) {
+	else if (method == 10) {
 		// SIMD Montgomery multiplication. 0.493s.
 		const int PAR = 8;
 		typedef __m256i mi;
@@ -299,7 +326,7 @@ int main(int argc, char** argv) {
 		N prod = mont.one();
 		rep(i,0,PAR) {
 			union {
-				ull i[4];
+				u64 i[4];
 				mi m;
 			} u;
 			u.m = prods[i];
