@@ -86,11 +86,49 @@ Mont::Mont(int mod) : Mod(mod) {
 
 N Mont::redc(int a, int b) {
 	ll T = (ll)a * b;
-	ll m = (unsigned)T * NPrime;
+	ll m = (unsigned)T * (unsigned)NPrime;
 	T += m * Mod;
 	T >>= 32;
 	if (T >= Mod)
 		T -= Mod;
+	return raw((int)T);
+}
+
+struct RelaxedMont {
+	int Mod, R1Mod, R2Mod, NPrime;
+
+	RelaxedMont(int mod);
+
+	N redc(int a, int b);
+	N raw(int x) { N r; r.x = x; return r; }
+	N from(int x) { assert (x < Mod); return redc(x, R2Mod); }
+	N one() { return raw(R1Mod); }
+	int get(N a) { return redc(a.x, 1).x; }
+
+	N mul(N a, N b) { return redc(a.x, b.x); }
+};
+
+RelaxedMont::RelaxedMont(int mod) : Mod(mod) {
+	const ll B = (1LL << 32);
+	assert((mod & 1) != 0);
+	ll R = B % mod;
+	ll xinv = 1, bit = 2;
+	for (int i = 1; i < 32; i++, bit <<= 1) { // Hensel lifting!
+		ll y = xinv * mod;
+		if ((y & bit) != 0)
+			xinv |= bit;
+	}
+	assert(((mod * xinv) & (B-1)) == 1);
+	R1Mod = (int)R;
+	R2Mod = (int)(R * R % mod);
+	NPrime = (int)(B - xinv);
+}
+
+N RelaxedMont::redc(int a, int b) {
+	ll T = (ll)a * b;
+	ll m = (unsigned)T * (unsigned)NPrime;
+	T += m * Mod;
+	T >>= 32;
 	return raw((int)T);
 }
 
@@ -293,6 +331,26 @@ int main(int argc, char** argv) {
 		cout << mont.get(prod) << endl;
 	}
 	else if (method == 10) {
+		// Relaxed Montgomery multiplication. 1.232s.
+		const int PAR = 8;
+		RelaxedMont mont(M);
+		N prods[PAR];
+		rep(i,0,PAR) prods[i] = mont.one();
+		int i = 1;
+		for (; i + PAR <= M;) {
+			rep(j,0,PAR)
+				prods[j] = mont.mul(prods[j], mont.raw(i)), i++;
+		}
+		N prod = mont.one();
+		rep(i,0,PAR) prod = mont.mul(prod, prods[i]);
+		while (i < M) {
+			prod = mont.mul(prod, mont.raw(i)), i++;
+		}
+		// We ought to multiply by R^(M-1) to account for the non-Montgomery
+		// form numbers that got multiplied in. But that's 1, so no need.
+		cout << mont.get(prod) << endl;
+	}
+	else if (method == 11) {
 		// SIMD Montgomery multiplication. 0.493s.
 		const int PAR = 8;
 		typedef __m256i mi;
@@ -339,6 +397,50 @@ int main(int argc, char** argv) {
 		// We ought to multiply by R^(M-1) to account for the non-Montgomery
 		// form numbers that got multiplied in. But that's 1, so no need.
 		cout << mont.get(prod) << endl;
+	}
+	else if (method == 12) {
+		// SIMD Relaxed Montgomery multiplication. 0.435s.
+		const int PAR = 8;
+		typedef __m256i mi;
+		Mont mont(M);
+		mi prods[PAR];
+		mi accs[PAR];
+		rep(i,0,PAR) {
+			prods[i] = _mm256_set1_epi64x(mont.one().x);
+			accs[i] = _mm256_setr_epi64x(4*i + 1, 4*i + 2, 4*i + 3, 4*i + 4);
+		}
+		mi iaccadd = _mm256_set1_epi64x(4 * PAR);
+		mi mnprime = _mm256_set1_epi64x(mont.NPrime);
+		mi mmod = _mm256_set1_epi64x(mont.Mod);
+		int i = 1;
+		for (; i + PAR * 4 <= M; i += PAR * 4) {
+			rep(j,0,PAR) {
+				mi a = prods[j];
+				mi b = accs[j];
+				accs[j] = _mm256_add_epi64(b, iaccadd);
+				mi T = _mm256_mul_epu32(a, b);
+				mi m = _mm256_mul_epu32(T, mnprime); // uses lo 32 bits of T
+				T = _mm256_add_epi64(T, _mm256_mul_epu32(m, mmod)); // uses lo 32 bits of m
+				T = _mm256_srli_epi64(T, 32);
+				prods[j] = T;
+			}
+		}
+		N prod = mont.one();
+		rep(i,0,PAR) {
+			union {
+				u64 i[4];
+				mi m;
+			} u;
+			u.m = prods[i];
+			rep(j,0,4)
+				prod = mont.mul(prod, mont.raw((int)u.i[j]));
+		}
+		while (i < M) {
+			prod = mont.mul(prod, mont.raw(i)), i++;
+		}
+		// We ought to multiply by R^(M-1) to account for the non-Montgomery
+		// form numbers that got multiplied in. But that's 1, so no need.
+		cout << mont.get(prod) % M << endl;
 	}
 
 	exit(0);

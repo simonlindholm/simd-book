@@ -1,3 +1,4 @@
+#pragma GCC optimize ("O3")
 #include <bits/stdc++.h>
 using namespace std;
 
@@ -97,7 +98,7 @@ ll solve(ll N, ll K, int p, int a) {
 			}
 			prod = uprod % mod;
 		} else {
-			const int PAR = 16;
+			const int PAR = 8;
 			u64 subprod[PAR];
 			rep(i,0,PAR) subprod[i] = 1;
 			while (cur + PAR <= lim) {
@@ -113,7 +114,6 @@ ll solve(ll N, ll K, int p, int a) {
 				prod = ba.reduce(prod * cur2);
 			}
 			prod %= mod;
-			if (prod < 0) prod += mod;
 		}
 		if (accMult > 0) res = res * modpow(prod, accMult, mod) % mod;
 		else resdiv = resdiv * modpow(prod, -accMult, mod) % mod;
