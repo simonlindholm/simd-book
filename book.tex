@@ -9,6 +9,8 @@
 \usepackage{courier} % bold monospace
 % \usepackage{ctex} % Chinese characters, takes too long to compile for now
 
+\bibliographystyle{ieeetr}
+
 % lstlisting settings:
 \lstset{language=C++}
 \lstset{morekeywords={alignas,alignof}}
@@ -493,7 +495,9 @@ Hence, \verb@cur % p == 0@ can be replaced by \verb@(u32)cur * pinv <= plim@, mu
 We do need to be careful to treat $p = 2$ specially, since 2 is not invertible mod $2^{32}$.
 However, this special-casing will be needed later on anyway, when we start looking into optimizing the modular multiplication.
 
-Performance-wise, this doesn't make much of a difference -- we go from 20.8 seconds to 19.3. It seems likely that we are latency-bound. To avoid this latency bottleneck, let's do as before and use multiple accumulators:
+Performance-wise, this doesn't make much of a difference -- we go from 20.8 seconds to 19.3.
+It seems likely that we are latency-bound.
+To avoid this latency bottleneck, let's do as before and use multiple accumulators:
 
 \begin{lstlisting}
 const int PAR = 2;
@@ -512,7 +516,8 @@ for (; cur < lim; cur++) {
 }
 \end{lstlisting}
 
-This gives us a (still pretty awful) runtime of 11.848s. Making the divisibility check branchless by doing
+This gives us a (still pretty awful) runtime of 11.848s.
+Making the divisibility check branchless by doing
 \begin{lstlisting}
 subprod[i] * ((u32)cur * pinv > plim ? cur : 1) % mod;
 \end{lstlisting}
@@ -528,7 +533,7 @@ Well, what we \emph{can} do is roll our own modular multiplication.
 One way of doing modular reduction quickly is by using Barrett reduction.
 The way it works is by writing $a \% b = a - \lfloor a / b \rfloor b$, and approximately computing the value of $\lfloor a / b \rfloor$ as $\lfloor (\lfloor (2^{64} - 1) / b \rfloor \cdot a) / 2^{64} \rfloor$.
 We can then apply a final correction if the resulting approximate value of $a \% b$ is outside the range $[0, b)$.
-Since $b =$ \verb@mode@ will be constant over many multiplications, we can precompute the value of $\lfloor (2^{64} - 1) / b \rfloor$, turning the work needed for a single modular reduction into just two multiplications, a subtraction and a range correction.
+Since $b =$ \verb@mod@ will be constant over many multiplications, we can precompute the value of $\lfloor (2^{64} - 1) / b \rfloor$, turning the work needed for a single modular reduction into just two multiplications, a subtraction and a range correction.
 \begin{lstlisting}
 typedef uint64_t u64;
 typedef __uint128_t u128;
@@ -545,8 +550,18 @@ struct Barrett {
 Note that while we appear to use 128-bit arithmetic in the \verb@reduce@ function, which seems slow, the x86 instruction set actually has an instruction for \mbox{$64*64\rightarrow128$} bit multiplication, making the computation of \verb@q@ into a single instruction.
 (Other instruction sets commonly also have this sort of operation -- it's useful for implementing arbitrary precision integers.)
 
-We can now rewrite the loop:
+The given Barrett reduction implementation is valid for all 64-bit integers $a \ge 0, b > 0$. This follows from a few lines of algebra:
+\begin{itemize}
+\item $r \ge 0$: $a - \lfloor(\lfloor (2^{64} - 1) / b\rfloor \cdot a)/2^{64}\rfloor \cdot b \ge a - ((((2^{64} - 1) / b) \cdot a)/2^{64}) \cdot b = a / 2^{64} \ge 0$.
+\item $r < 2b$: $a - \lfloor(\lfloor (2^{64} - 1) / b\rfloor \cdot a)/2^{64}\rfloor \cdot b < a - ((\lfloor (2^{64} - 1) / b\rfloor \cdot a)/2^{64} - 1) \cdot b \le a - ((((2^{64} - 1) / b - (b - 1) / b) \cdot a)/2^{64} - 1) \cdot b = b (1 + a/2^{64}) < 2b$.
+\item Finally, none of the computations overflow.
+\end{itemize}
+
+Let us rewrite the factorial loop using the above Barrett reduction:
 \begin{lstlisting}
+#pragma GCC optimize("O3")
+...
+
 Barrett ba(mod);
 ...
 
@@ -566,10 +581,12 @@ for (; cur < lim; cur++) {
 	prod = ba.reduce(prod * cur2);
 }
 \end{lstlisting}
-This runs in 2.541s, quite a lot better than before! As a side note, Barrett reduction corresponds roughly to what compilers do to optimize \verb@a % b@ where \verb@b@ is a compile-time constant.
+This runs in 2.122s, which quite a lot better than before!
+As a side note, Barrett reduction corresponds roughly to what compilers do to optimize \verb@a % b@ where \verb@b@ is a compile-time constant.
 
 \subsection*{Relaxed Barrett reduction}
-The step in the Barrett reduction where we reduce $a$ into $[0, b)$ is nice for giving an answer in canonical form, but it is a bit unnecessarily slow. If we accept working with numbers in the range $[0, 2b)$, we can skip that part and do a reduction only at the end:
+The step in the Barrett reduction where we reduce the result into $[0, b)$ is nice for giving an answer in canonical form, but it is a bit unnecessarily slow.
+If we accept working with numbers in the range $[0, 2b)$, we can skip that part and do a reduction only at the end:
 \begin{lstlisting}
 u64 reduce(u64 a) {
 	return a - (u64)((u128(m) * a) >> 64) * b;
@@ -578,15 +595,59 @@ u64 reduce(u64 a) {
 
 prod %= mod;
 \end{lstlisting}
-1.746s! Nice. In reference to the side note from before, this is actually \emph{faster} than what the compiler would have produced with the naive version if \verb@mod@ was constant, which is an impressive feat.
+1.246s! Nice.
+In reference to the side note from before, this is actually \emph{faster} than what the compiler would have produced with the naive version if \verb@mod@ was constant, which is a cool feat.
 
 \subsection*{Floating-point modmul}
 
+Similarly to the idea behind Barrett reduction, we can compute $a / b$ approximately using floating point numbers, and use that to get a good enough \verb@a % b@, in the range $(-(1+\epsilon)b, (1+\epsilon)b)$. We combine multiplication and reduction in order to keep to 32-bit integers, making use of integer overflow:
+
+\begin{lstlisting}
+int modmul(int a, int b, int m) {
+	return (int)((u32)a * b - (u32)(int)(1.0 / m * a * b) * m);
+}
+\end{lstlisting}
+
+There is still precomputation happening here, but it's a bit harder to spot: it's done automatically by the compiler which recognizes that \verb@1.0 / m@ is constant across loop iterations.
+
+To get a sense of the range in which the modular multiplication works, let us without loss of generality assume $a,b \ge 0$ (negative numbers just negate the result), and look at an upper bound for
+\[ ab - \lfloor r(r(r(1/m)\cdot a)\cdot b)\rfloor \cdot m \]
+where $r(x)$ denotes rounding $x$ to the nearest double.
+$r(x)$ obeys $|r(x) - x| \le x \cdot 2^{-53}$, so we get
+\begin{align*}
+ab - \lfloor r(r(r(1/m)\cdot a)\cdot b)\rfloor \cdot m
+&< ab - (r(r(r(1/m)\cdot a)\cdot b) - 1) \cdot m \\
+&\le ab - (ab/m \cdot (1 - 2^{-53})^3 - 1) \cdot m \\
+&\le m + 3ab \cdot 2^{-53}.
+\end{align*}
+Hence, as long as $3|ab| < 0.01 c m \cdot 2^{53}$ the result will fall within $(-1.01m, 1.01m)$, and if $|a|,|b| \le 1.01 m$ and $m < 2^{31} / 1.01$, that inequality certainly holds and nor will the output overflow. If not for using 32-bit integers as input parameters, we would be able to go higher, up to $2^{51}$ or so. For a more thorough analysis on the same subject, see \cite{modmulproof}.
+
+Let's try using this for our program:
+
+\begin{lstlisting}
+const int PAR = 16;
+... parallel loop elided
+for (; cur < lim; cur++) {
+	int cur2 = (u32)cur * pinv > plim ? cur : 1;
+	prod = modmul((int)prod, cur2, mod);
+}
+prod %= mod;
+if (prod < 0) prod += mod;
+\end{lstlisting}
+
+This runs in 2.078s, which is worse than Barrett reduction. However, it's not completely useless -- we could possibly combine the two since integers and floats use different circuitry, and the avoidance of \mbox{$64*64\rightarrow128$}-bit multiplications makes it more amenable to SIMD. Let's get back to this later.
 
 \subsection*{Montgomery multiplication}
 
-SIMD versions (modulo: no, barrett: no, float: yes, montgomery: yes)
-\url{https://gist.github.com/simonlindholm/51f88e9626408723cf906c6debd3814b}
+In comparison to Barrett reduction and the floating-point based modular multiplication, Montgomery multiplication is more complicated.
+% Wikipedia has a decent explanation \cite{montgomerywiki}.
+same idea of relaxation applies
+use redc directly
+must multiply with $R^count$
+
+\subsection*{SIMDed modular multiplication}
+
+modulo: no, barrett: no, float: yes, montgomery: yes
 
 \chapter{Example: Fibonacci-ish II}
 % concepts: bitsets, using data structures, shuffles
@@ -663,5 +724,9 @@ minimizing reads/writes by synchronizing operations
 combining popcounts
 \url{https://gist.github.com/simonlindholm/0762dfb382249a1916a7f885183c84b5}
 \url{https://gist.github.com/simonlindholm/6a6561bbca9b80af2e46a148791bc53c}
+
+\appendix
+\chapter*{References}
+\bibliography{bibliography.bib}
 
 \end{document}
