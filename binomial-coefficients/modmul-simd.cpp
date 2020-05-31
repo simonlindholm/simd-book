@@ -53,45 +53,39 @@ struct N {
 };
 
 struct Mont {
-	int Mod, R1Mod, R2Mod, NPrime;
+	uint32_t Mod, R1Mod, R2Mod, NPrime;
 
-	Mont(int mod);
+	Mont(uint32_t mod);
 
-	N redc(int a, int b);
-	N raw(int x) { N r; r.x = x; return r; }
-	N from(int x) { assert (x < Mod); return redc(x, R2Mod); }
+	N redc(uint32_t a, uint32_t b);
+	N raw(uint32_t x) { N r; r.x = x; return r; }
+	N from(uint32_t x) { assert (x < Mod); return redc(x, R2Mod); }
 	N one() { return raw(R1Mod); }
-	int get(N a) { return redc(a.x, 1).x; }
+	uint32_t get(N a) { return redc(a.x, 1).x; }
 
 	N mul(N a, N b) { return redc(a.x, b.x); }
-	N add(N a, N b) { int x = a.x + b.x; if (x >= Mod) x -= Mod; return raw(x); }
-	N sub(N a, N b) { int x = a.x - b.x; if (a.x < b.x) x += Mod; return raw(x); }
+	N add(N a, N b) { uint32_t x = a.x + b.x; if (x >= Mod) x -= Mod; return raw(x); }
+	N sub(N a, N b) { uint32_t x = a.x - b.x; if (a.x < b.x) x += Mod; return raw(x); }
 };
 
-Mont::Mont(int mod) : Mod(mod) {
-	const ll B = (1LL << 32);
-	assert((mod & 1) != 0);
-	ll R = B % mod;
-	ll xinv = 1, bit = 2;
-	for (int i = 1; i < 32; i++, bit <<= 1) { // Hensel lifting!
-		ll y = xinv * mod;
-		if ((y & bit) != 0)
-			xinv |= bit;
-	}
-	assert(((mod * xinv) & (B-1)) == 1);
-	R1Mod = (int)R;
-	R2Mod = (int)(R * R % mod);
-	NPrime = (int)(B - xinv);
+Mont::Mont(unsigned mod) : Mod(mod) {
+	assert(mod & 1);
+	R1Mod = -1U % mod + 1; // 2^32 % mod
+	unsigned xinv = 1;
+	rep(i,0,5) xinv = xinv * (2 - mod * xinv);
+	assert(xinv * mod == 1);
+	R2Mod = (unsigned)((uint64_t)R1Mod * R1Mod % mod);
+	NPrime = -xinv;
 }
 
-N Mont::redc(int a, int b) {
-	ll T = (ll)a * b;
-	ll m = (unsigned)T * (unsigned)NPrime;
+N Mont::redc(unsigned a, unsigned b) {
+	uint64_t T = (uint64_t)a * b;
+	uint64_t m = (uint32_t)T * NPrime;
 	T += m * Mod;
 	T >>= 32;
 	if (T >= Mod)
 		T -= Mod;
-	return raw((int)T);
+	return raw((unsigned)T);
 }
 
 struct RelaxedMont {

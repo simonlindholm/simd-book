@@ -114,8 +114,9 @@ only going to cover constant factors, mostly problem-independent
 - transposing arrays
 - help out alias analysis?
 \chapter{Working with bits}
-- bit hacks (\url{https://graphics.stanford.edu/~seander/bithacks.html})
+- bit hacks (\url{https://graphics.stanford.edu/~seander/bithacks.html}, Hacker's Delight)
 - bitsets (\verb@_Find_first@, \verb@_Find_next@, \verb@count()@)
+- bitslicing
 - compiler intrinsics: \verb@__builtin_clzll@, \verb@popcountll@
 - example: ?? gauss elim?
 
@@ -534,9 +535,8 @@ Raising \verb@PAR@ further makes performance worse, and turning on -O3 makes no 
 So... where do we go from here?
 We can't turn to SIMD, because there's no SIMD integer division or modulo instruction.
 Well, what we \emph{can} do is roll our own modular multiplication.
-% There a couple of different techniques for this, usually relying on the modulus remaining constant over many operations.
 
-\subsection*{Barrett reduction}
+\subsection{Barrett reduction}
 One way of doing modular reduction quickly is by using Barrett reduction.
 The way it works is by writing $a \% b = a - \lfloor a / b \rfloor b$, and approximately computing the value of $\lfloor a / b \rfloor$ as $\lfloor (\lfloor (2^{64} - 1) / b \rfloor \cdot a) / 2^{64} \rfloor$.
 We can then apply a final correction if the resulting approximate value of $a \% b$ is outside the range $[0, b)$.
@@ -591,7 +591,7 @@ for (; cur < lim; cur++) {
 This runs in 2.122s, which quite a lot better than before!
 As a side note, Barrett reduction corresponds roughly to what compilers do to optimize \verb@a % b@ where \verb@b@ is a compile-time constant.
 
-\subsection*{Relaxed Barrett reduction}
+\subsection{Relaxed Barrett reduction}
 The step in the Barrett reduction where we reduce the result into $[0, b)$ is nice for giving an answer in canonical form, but it is a bit unnecessarily slow.
 If we accept working with numbers in the range $[0, 2b)$, we can skip that part and do a reduction only at the end:
 \begin{lstlisting}
@@ -605,7 +605,7 @@ prod %= mod;
 1.246s! Nice.
 In reference to the side note from before, this is actually \emph{faster} than what the compiler would have produced with the naive version if \verb@mod@ was constant, which is a cool feat.
 
-\subsection*{Floating-point modmul}
+\subsection{Floating-point modmul}
 
 Similarly to the idea behind Barrett reduction, we can compute $a / b$ approximately using floating point numbers, and use that to get a good enough \verb@a % b@, in the range $(-(1+\epsilon)b, (1+\epsilon)b)$. We combine multiplication and reduction in order to keep to 32-bit integers, making use of integer overflow:
 
@@ -644,15 +644,50 @@ if (prod < 0) prod += mod;
 
 This runs in 2.078s, which is worse than Barrett reduction. However, it's not completely useless -- we could possibly combine the two since integers and floats use different circuitry, and the avoidance of \mbox{$64*64\rightarrow128$}-bit multiplications makes it more amenable to SIMD. Let's get back to this later.
 
-\subsection*{Montgomery multiplication}
+\subsection{Montgomery multiplication}
 
 In comparison to Barrett reduction and the floating-point based modular multiplication, Montgomery multiplication is more complicated.
-% Wikipedia has a decent explanation \cite{montgomerywiki}.
-same idea of relaxation applies
-use redc directly
-must multiply with $R^count$
+The idea is that we take the usual division algorithm that involves subtracting multiples of $b$ from $a$ until we reach the smallest possible non-negative value, and instead turn it around, \emph{adding} multiples of $b$ until we reach the (approximately) smallest possible value that's divisible by $2^{32}$.
+The number of multiples to add can be computed using a single multiplication.
+We then right-shift by $32$, producing a value congruent to $a / 2^{32} \pmod b$ in the range $[0, 2b)$, which we can range-reduce if we feel like it.
+This operation that computes $a / 2^{32} \pmod b$ is customarily called \verb@redc@.
+We can compensate for the additional factor of $2^{-32} \pmod b$ by pre-multiplying all numbers by $2^{32}$, or by multiplying by $(2^{32})^{\text{\#multiplications}} \pmod b$ at the very end.
+In code:
 
-\subsection*{SIMDed modular multiplication}
+\begin{lstlisting}
+struct Mont {
+	u32 mod, npr;
+
+	Mont(u32 mod) : mod(mod), npr(-invp2(mod)) {}
+
+	u32 redc(u64 a) {
+		u32 m = (u32)a * npr;
+		a += (u64)m * mod;
+		return (u32)(a >> 32);
+	}
+};
+\end{lstlisting}
+
+proof
+assume odd modulus
+
+Let us apply this to our program, as usual:
+\begin{lstlisting}
+const int PAR = 4;
+u32 subprod[PAR];
+rep(i,0,PAR) subprod[i] = 1;
+int iters = lim - cur;
+... parallel loop elided
+rep(i,0,PAR) prod = mont.redc((u64)prod * subprod[i]);
+for (; cur < lim; cur++) {
+	u32 cur2 = (u32)cur * pinv > plim ? cur : 1;
+	prod = mont.redc((u64)prod * cur2);
+}
+prod = prod * modpow(2, 32LL * (iters + PAR), mod) % mod;
+\end{lstlisting}
+1.367s. This is again slightly worse than the Barrett reduction, but as with the floating-point modmul, the potential for SIMD is higher since there are no \mbox{$64*64\rightarrow128$}-bit multiplications.
+
+\subsection{SIMDed modular multiplication}
 
 modulo: no, barrett: no, float: yes, montgomery: yes
 
