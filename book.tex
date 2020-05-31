@@ -469,8 +469,7 @@ for (; cur < lim; cur++) {
 \end{lstlisting}
 
 There are two things that are slow: the divisibility check by \texttt{p}, and the modular multiplication.
-The former would be easy to eliminate by turning the loop into two nested loops, with the innermost looping from $1$ to $p-1$, however, this will make the code messier when we start applying SIMD.
-Instead, let's use another trick:
+The former would be easy to eliminate by turning the loop into two nested loops, with the innermost looping from $1$ to $p-1$, however, in the interest of keeping the code short we will start by using another trick:
 
 \begin{lstlisting}
 u32 invp2(u32 x) { // x^-1 mod 2^32
@@ -501,7 +500,7 @@ On the other hand, if \verb@cur@ is not divisible by $p$, multiplying by the mod
 Hence, \verb@cur % p == 0@ can be replaced by \verb@(u32)cur * pinv <= plim@, multiplication being a much cheaper operation than modulo.
 
 We do need to be careful to treat $p = 2$ specially, since 2 is not invertible mod $2^{32}$.
-However, this special-casing will be needed later on anyway, when we start looking into optimizing the modular multiplication.
+However, this special-casing will be needed later on anyway, when we start looking into optimizing the modular multiplication. (By using 64-bit integers, it is possible to write a divisibility check similar to the above that works for both even and odd numbers, see \cite{fastdivcheck}.)
 
 Performance-wise, this doesn't make much of a difference -- we go from 20.8 seconds to 19.3.
 It seems likely that we are latency-bound.
@@ -656,20 +655,28 @@ In code:
 
 \begin{lstlisting}
 struct Mont {
-	u32 mod, npr;
+	u32 m, npr; // npr = -(m^-1) mod 2^32
 
-	Mont(u32 mod) : mod(mod), npr(-invp2(mod)) {}
+	Mont(u32 mod) : m(mod), npr(-invp2(mod)) {}
 
 	u32 redc(u64 a) {
-		u32 m = (u32)a * npr;
-		a += (u64)m * mod;
-		return (u32)(a >> 32);
+		u32 b = (u32)a * npr;
+		u64 c = a + (u64)b * m;
+		return (u32)(c >> 32);
 	}
 };
 \end{lstlisting}
 
-proof
-assume odd modulus
+To see that it works, observe that:
+\begin{itemize}
+  \item $c = a + a \cdot (-m^{-1}) \cdot m = 0 \pmod{2^{32}}$
+  \item $c = a \pmod{m}$
+  \item $c/2^{32} \ge 0$
+  \item $c/2^{32} < a/2^{32} + m$
+\end{itemize}
+Hence, as long as $a < m\cdot 2^{32}$, the result will end up in $[0, 2\cdot m)$.
+
+This method only works if the modulus is odd, since it depends on the existence of $m^{-1} \pmod{2^{32}}$. In our case, we have ensured this by special-casing $p = 2$.
 
 Let us apply this to our program, as usual:
 \begin{lstlisting}
@@ -685,11 +692,21 @@ for (; cur < lim; cur++) {
 }
 prod = prod * modpow(2, 32LL * (iters + PAR), mod) % mod;
 \end{lstlisting}
-1.367s. This is again slightly worse than the Barrett reduction, but as with the floating-point modmul, the potential for SIMD is higher since there are no \mbox{$64*64\rightarrow128$}-bit multiplications.
+This runs in 1.367s. That is again slightly worse than the Barrett reduction, but as with the floating-point modmul, the potential for SIMD is higher since there are no \mbox{$64*64\rightarrow128$}-bit multiplications.
 
 \subsection{SIMDed modular multiplication}
 
-modulo: no, barrett: no, float: yes, montgomery: yes
+We still have the potential to go further using SIMD.
+Let us consider the different modular multiplication algorithms we have and how we could vectorize them.
+
+As alluded to, the Barrett reduction is hard to vectorize, because the x86 SIMD instruction set is missing an \mbox{$64*64\rightarrow128$}-bit multiplier.
+The relevant instructions that do exist are \verb@_mm_mullo_epi32@ (\mbox{$32*32\rightarrow32$}-bit multiplication), \verb@_mm_mul_epi32@ (signed \mbox{$32*32\rightarrow64$}-bit multiplication, using the bottom $32$ bits of each 64-bit lane) and \verb@_mm_mul_epu32@ (unsigned \mbox{$32*32\rightarrow64$}-bit multiplication).
+We could potentially create a \mbox{$64*64\rightarrow128$}-bit multiplier out of these, but it would be hard without add-with-carry instructions, and it wouldn't be fast.
+
+On the other hand, both the float-based modular multiplication and the Montgomery multiplication are in principle easy to vectorize. The main annoyance comes from the fact that the divisibility check by $p$ starts to become a bottleneck, in comparison to the scalar code where it was only about a 5\% speed loss.
+
+\begin{lstlisting}
+\end{lstlisting}
 
 \chapter{Example: Fibonacci-ish II}
 % concepts: bitsets, using data structures, shuffles

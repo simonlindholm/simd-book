@@ -5,3 +5,18 @@ year="2020",
 howpublished="\url{https://github.com/kth-competitive-programming/kactl/blob/master/doc/modmul-proof.tex}",
 }
 
+@article{fastdivcheck,
+author = {Lemire, Daniel and Kaser, Owen and Kurz, Nathan},
+title = {Faster remainder by direct computation: Applications to compilers and software libraries},
+journal = {Software: Practice and Experience},
+volume = {49},
+number = {6},
+pages = {953-970},
+keywords = {bit manipulation, divisibility, integer division},
+doi = {10.1002/spe.2689},
+url = {https://onlinelibrary.wiley.com/doi/abs/10.1002/spe.2689},
+eprint = {https://onlinelibrary.wiley.com/doi/pdf/10.1002/spe.2689},
+abstract = {Summary On common processors, integer multiplication is many times faster than integer division. Dividing a numerator n by a divisor d is mathematically equivalent to multiplication by the inverse of the divisor (n/d=n∗1/d). If the divisor is known in advance, or if repeated integer divisions will be performed with the same divisor, it can be beneficial to substitute a less costly multiplication for an expensive division. Currently, the remainder of the division by a constant is computed from the quotient by a multiplication and a subtraction. However, if just the remainder is desired and the quotient is unneeded, this may be suboptimal. We present a generally applicable algorithm to compute the remainder more directly. Specifically, we use the fractional portion of the product of the numerator and the inverse of the divisor. On this basis, we also present a new and simpler divisibility algorithm to detect nonzero remainders. We also derive new tight bounds on the precision required when representing the inverse of the divisor. Furthermore, we present simple C implementations that beat the optimized code produced by state-of-the-art C compilers on recent x64 processors (eg, Intel Skylake and AMD Ryzen), sometimes by more than 25\%. On all tested platforms, including 64-bit ARM and POWER8, our divisibility test functions are faster than state-of-the-art Granlund-Montgomery divisibility test functions, sometimes by more than 50\%.},
+year = {2019}
+}
+
