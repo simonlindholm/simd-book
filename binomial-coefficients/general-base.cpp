@@ -31,7 +31,7 @@ void factor(ll n, F f) {
 ll modpow(ll a, ll e, ll m) {
 	if (e == 0) return 1;
 	ll x = modpow(a * a % m, e >> 1, m);
-	return e & 1 ? x * a : x;
+	return e & 1 ? x * a % m : x;
 }
 
 // N choose K modulo p^a

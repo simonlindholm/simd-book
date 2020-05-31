@@ -393,7 +393,7 @@ void factor(ll n, F f) {
 ll modpow(ll a, ll e, ll m) {
 	if (e == 0) return 1;
 	ll x = modpow(a * a % m, e >> 1, m);
-	return e & 1 ? x * a : x;
+	return e & 1 ? x * a % m : x;
 }
 
 // N choose K modulo p^a
@@ -472,7 +472,14 @@ The former would be easy to eliminate by turning the loop into two nested loops,
 Instead, let's use another trick:
 
 \begin{lstlisting}
-u32 pinv = (u32) modpow(p, (1LL << 31) - 1, 1LL << 32);
+u32 invp2(u32 x) { // x^-1 mod 2^32
+	unsigned xinv = 1;
+	rep(i,0,5) xinv = xinv * (2 - x * xinv);
+	return xinv;
+}
+...
+
+u32 pinv = invp2(p);
 u32 plim = 0xFFFFFFFF / p;
 ...
 

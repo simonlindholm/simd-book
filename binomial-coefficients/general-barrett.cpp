@@ -30,10 +30,16 @@ void factor(ll n, F f) {
 	if (n > 1) f(n, 1);
 }
 
+u32 invp2(u32 x) { // x^-1 mod 2^32
+	unsigned xinv = 1;
+	rep(i,0,5) xinv = xinv * (2 - x * xinv);
+	return xinv;
+}
+
 ll modpow(ll a, ll e, ll m) {
 	if (e == 0) return 1;
 	ll x = modpow(a * a % m, e >> 1, m);
-	return e & 1 ? x * a : x;
+	return e & 1 ? x * a % m : x;
 }
 
 typedef uint64_t u64;
@@ -72,7 +78,7 @@ ll solve(ll N, ll K, int p, int a) {
 		}
 	}
 
-	u32 pinv = (u32)modpow(p, (1LL << 31) - 1, 1LL << 32);
+	u32 pinv = invp2(p);
 	u32 plim = 0xFFFFFFFF / p;
 
 	Barrett ba(mod);
