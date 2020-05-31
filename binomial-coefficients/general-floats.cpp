@@ -37,8 +37,7 @@ ll modpow(ll a, ll e, ll m) {
 }
 
 int modmul(int a, int b, int m) {
-	ll ab = (ll)a * b;
-	return (int)(ab - (u32)(int)(1.0 / m * ab) * m);
+	return (int)((u32)a * b - (u32)(int)(1.0 / m * a * b) * m);
 }
 
 // N choose K modulo p^a
@@ -69,7 +68,7 @@ ll solve(ll N, ll K, int p, int a) {
 	u32 pinv = (u32)modpow(p, (1LL << 31) - 1, 1LL << 32);
 	u32 plim = 0xFFFFFFFF / p;
 
-	int cur = 1;
+	int cur = 0;
 	for (auto pa : ivs) {
 		int lim = pa.first;
 		// The numbers in the range [cur, lim) that aren't divisible by 'p' get

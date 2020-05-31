@@ -69,7 +69,7 @@ ll solve(ll N, ll K, int p, int a) {
 	u32 pinv = invp2(p);
 	u32 plim = 0xFFFFFFFF / p;
 
-	int cur = 1;
+	int cur = 0;
 	for (auto pa : ivs) {
 		int lim = pa.first;
 		// The numbers in the range [cur, lim) that aren't divisible by 'p' get

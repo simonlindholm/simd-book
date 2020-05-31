@@ -83,7 +83,7 @@ ll solve(ll N, ll K, int p, int a) {
 
 	Barrett ba(mod);
 
-	int cur = 1;
+	int cur = 0;
 	for (auto pa : ivs) {
 		int lim = pa.first;
 		// The numbers in the range [cur, lim) that aren't divisible by 'p' get
