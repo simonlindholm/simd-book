@@ -13,16 +13,42 @@
 \maketitle
 
 \section*{Abstract}
-We compare different techniques for modular multiplications, with a concrete application to computing binomial coefficients.
+We compare different techniques for modular multiplications, and apply this to compute binomial coefficients quickly.
 
-The paper is written from a competitive programming standpoint, with little regard to portability (all judges run GCC on Intel hardware).
-The benchmarking performed is highly unscientific, with measurements being done on an old laptop running an i5-4200U Haswell processor,
-and times being eyeballed medians of relatively high-variance measurements.
-That said, the overall conclusions should still be valid, and may be of interest outside of the competitive programming sphere as well.
-
-All source code is available at \href{https://github.com/simonlindholm/simd-book/tree/master/binomial-coefficients}{GitHub}.
+This paper is written as part of a future series about SIMD within competitive programming, based around different example problems.
+However, it may be of interest outside of the competitive programming sphere as well.
 
 \tableofcontents
+
+\section{Introduction}
+
+Modular multiplication comes up frequently within competitive programming,
+and it is sometimes useful to be able to do it quickly, e.g. to get away
+with bad time complexities.
+Using binomial coefficient computation as a running example, we show how
+to improve performance using data-parallel loops, SIMD and different
+algorithms for modular multiplication.
+We will first deal with the easy case of computing them mod $2^{32}$, and
+then modulo arbitrary integers in the range $[1, 10^9]$.
+
+As usual for competitive programming, we shall have
+little regard to portability and assume GCC and x86\_64,
+and use the following file header to keep code size down:
+
+\begin{lstlisting}
+#include <bits/stdc++.h>
+using namespace std;
+
+#define rep(i,f,t) for (int i = (f); i < (t); i++)
+typedef int64_t ll;
+\end{lstlisting}
+
+The benchmarking performed is highly unscientific,
+with measurements being done on an old laptop running an i5-4200U Haswell processor,
+and times eyeballed medians of relatively high-variance measurements.
+That said, the overall conclusions should still be valid.
+
+All source code is available at \href{https://github.com/simonlindholm/simd-book/tree/master/binomial-coefficients}{GitHub}.
 
 \input{ch-bincoef.tex}
 

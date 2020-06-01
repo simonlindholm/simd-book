@@ -13,7 +13,6 @@ using namespace std;
 typedef __m128i M;
 
 #define rep(i,a,b) for (int i = (a); i < (b); ++i)
-#define all(x) x.begin(), x.end()
 typedef long long ll;
 typedef uint32_t u32;
 

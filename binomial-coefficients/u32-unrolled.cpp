@@ -10,7 +10,6 @@
 using namespace std;
 
 #define rep(i,a,b) for (int i = (a); i < (b); ++i)
-#define all(x) x.begin(), x.end()
 typedef long long ll;
 typedef uint32_t u32;
 
