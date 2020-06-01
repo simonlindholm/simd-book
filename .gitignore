@@ -1,3 +1,9 @@
 *.out
 *.s
 */in/*large*
+*.aux
+*.log
+*.pdf
+*.toc
+*.bbl
+*.blg
