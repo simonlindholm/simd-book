@@ -7,6 +7,7 @@
 \usepackage{relsize} % larger math font size in one place
 \usepackage{listings} % source code listings
 \usepackage{courier} % bold monospace
+\usepackage{mathtools} % DeclarePairedDelimiter
 % \usepackage{ctex} % Chinese characters, takes too long to compile for now
 
 \bibliographystyle{ieeetr}
@@ -20,6 +21,10 @@
 \lstset{frame=single}
 \lstset{basicstyle=\small\ttfamily} % or \footnotesize?
 % \lstset{commentstyle=\normalfont\itshape}
+
+\newcommand{\todo}[1]{\textbf{TODO:} #1}
+\DeclarePairedDelimiter{\floor}{\lfloor}{\rfloor}
+\DeclarePairedDelimiter{\ceil}{\lceil}{\rceil}
 
 % Thanks to:
 % Dandan for AVX-512 and bouncing ideas
@@ -208,7 +213,7 @@ $x!$&$=$&          &$1$& $\cdot 2$ &$\cdot 3$ &$\cdot 4$ &$\cdot 5$ & $\cdot 6$ 
     &   &$\cdot \ldots$ &
 \end{tabular}
 \\
-$\even x$ gets an easy formula: $\sum_{k=1}^\infty \lfloor x / 2^k \rfloor$.
+$\even x$ gets an easy formula: $\sum_{k=1}^\infty \floor{x / 2^k}$.
 For $\odd x$, we get a decomposition into a number of odd double factorials $k!! = 1 \cdot 3 \cdot 5 \cdot \ldots \cdot k$.
 
 As it turns out, $1 \cdot 3 \cdot \ldots \cdot (2^{32}-1) = 1 \pmod{2^{32}}$, so $k!! = (k \mod 2^{32})!! \pmod{2^{32}}$.
@@ -530,6 +535,7 @@ subprod[i] * ((u32)cur * pinv > plim ? cur : 1) % mod;
 \end{lstlisting}
 improves it further to 10.933s (10.391s with no divisibility check at all).
 Raising \verb@PAR@ further makes performance worse, and turning on -O3 makes no difference.
+Newer processor architectures are somewhat faster at division than the Haswell I'm benchmarking on, but even with a judge running on ultra-modern hardware we would be pretty far from the 1 second goal.
 
 So... where do we go from here?
 We can't turn to SIMD, because there's no SIMD integer division or modulo instruction.
@@ -537,9 +543,9 @@ Well, what we \emph{can} do is roll our own modular multiplication.
 
 \subsection{Barrett reduction}
 One way of doing modular reduction quickly is by using Barrett reduction.
-The way it works is by writing $a \% b = a - \lfloor a / b \rfloor b$, and approximately computing the value of $\lfloor a / b \rfloor$ as $\lfloor (\lfloor (2^{64} - 1) / b \rfloor \cdot a) / 2^{64} \rfloor$.
+The way it works is by writing $a \% b = a - \floor{a / b} b$, and approximately computing the value of $\floor{a / b}$ as $\floor{(\floor{(2^{64} - 1) / b} \cdot a) / 2^{64}}$.
 We can then apply a final correction if the resulting approximate value of $a \% b$ is outside the range $[0, b)$.
-Since $b =$ \verb@mod@ will be constant over many multiplications, we can precompute the value of $\lfloor (2^{64} - 1) / b \rfloor$, turning the work needed for a single modular reduction into just two multiplications, a subtraction and a range correction.
+Since $b =$ \verb@mod@ will be constant over many multiplications, we can precompute the value of $\floor{(2^{64} - 1) / b}$, turning the work needed for a single modular reduction into just two multiplications, a subtraction and a range correction.
 \begin{lstlisting}
 typedef uint64_t u64;
 typedef __uint128_t u128;
@@ -558,8 +564,8 @@ Note that while we appear to use 128-bit arithmetic in the \verb@reduce@ functio
 
 The given Barrett reduction implementation is valid for all 64-bit integers $a \ge 0, b > 0$. This follows from a few lines of algebra:
 \begin{itemize}
-\item $r \ge 0$: $a - \lfloor(\lfloor (2^{64} - 1) / b\rfloor \cdot a)/2^{64}\rfloor \cdot b \ge a - ((((2^{64} - 1) / b) \cdot a)/2^{64}) \cdot b = a / 2^{64} \ge 0$.
-\item $r < 2b$: $a - \lfloor(\lfloor (2^{64} - 1) / b\rfloor \cdot a)/2^{64}\rfloor \cdot b < a - ((\lfloor (2^{64} - 1) / b\rfloor \cdot a)/2^{64} - 1) \cdot b \le a - ((((2^{64} - 1) / b - (b - 1) / b) \cdot a)/2^{64} - 1) \cdot b = b (1 + a/2^{64}) < 2b$.
+\item $r \ge 0$: $a - \floor{(\floor{ (2^{64} - 1) / b} \cdot a)/2^{64}} \cdot b \ge a - ((((2^{64} - 1) / b) \cdot a)/2^{64}) \cdot b = a / 2^{64} \ge 0$.
+\item $r < 2b$: $a - \floor{(\floor{ (2^{64} - 1) / b} \cdot a)/2^{64}} \cdot b < a - ((\floor{ (2^{64} - 1) / b} \cdot a)/2^{64} - 1) \cdot b \le a - ((((2^{64} - 1) / b - (b - 1) / b) \cdot a)/2^{64} - 1) \cdot b = b (1 + a/2^{64}) < 2b$.
 \item Finally, none of the computations overflow.
 \end{itemize}
 
@@ -617,11 +623,11 @@ int modmul(int a, int b, int m) {
 There is still precomputation happening here, but it's a bit harder to spot: it's done automatically by the compiler which recognizes that \verb@1.0 / m@ is constant across loop iterations.
 
 To get a sense of the range in which the modular multiplication works, let us without loss of generality assume $a,b \ge 0$ (negative numbers just negate the result), and look at an upper bound for
-\[ ab - \lfloor r(r(r(1/m)\cdot a)\cdot b)\rfloor \cdot m \]
+\[ ab - \floor{ r(r(r(1/m)\cdot a)\cdot b)} \cdot m \]
 where $r(x)$ denotes rounding $x$ to the nearest double.
 $r(x)$ obeys $|r(x) - x| \le x \cdot 2^{-53}$, so we get
 \begin{align*}
-ab - \lfloor r(r(r(1/m)\cdot a)\cdot b)\rfloor \cdot m
+ab - \floor{ r(r(r(1/m)\cdot a)\cdot b)} \cdot m
 &< ab - (r(r(r(1/m)\cdot a)\cdot b) - 1) \cdot m \\
 &\le ab - (ab/m \cdot (1 - 2^{-53})^3 - 1) \cdot m \\
 &\le m + 3ab \cdot 2^{-53}.
@@ -650,7 +656,10 @@ The idea is that we take the usual division algorithm that involves subtracting 
 The number of multiples to add can be computed using a single multiplication.
 We then right-shift by $32$, producing a value congruent to $a / 2^{32} \pmod b$ in the range $[0, 2b)$, which we can range-reduce if we feel like it.
 This operation that computes $a / 2^{32} \pmod b$ is customarily called \verb@redc@.
-We can compensate for the additional factor of $2^{-32} \pmod b$ by pre-multiplying all numbers by $2^{32}$, or by multiplying by $(2^{32})^{\text{\#multiplications}} \pmod b$ at the very end.
+We can compensate for the additional factor of $2^{-32} \pmod b$ by pre-multiplying all numbers by $2^{32},$\footnote{
+This is known as putting numbers in Montgomery form, and can be done using \texttt{redc(x, 2\^{}64 \% mod)}.
+The product of two numbers in Montgomery form is another number in Montgomery form, and we get numbers back in regular form using \texttt{redc(x, 1)}.
+} or by multiplying by $(2^{32})^{\text{\#multiplications}} \pmod b$ at the very end.
 In code:
 
 \begin{lstlisting}
@@ -703,10 +712,178 @@ As alluded to, the Barrett reduction is hard to vectorize, because the x86 SIMD 
 The relevant instructions that do exist are \verb@_mm_mullo_epi32@ (\mbox{$32*32\rightarrow32$}-bit multiplication), \verb@_mm_mul_epi32@ (signed \mbox{$32*32\rightarrow64$}-bit multiplication, using the bottom $32$ bits of each 64-bit lane) and \verb@_mm_mul_epu32@ (unsigned \mbox{$32*32\rightarrow64$}-bit multiplication).
 We could potentially create a \mbox{$64*64\rightarrow128$}-bit multiplier out of these, but it would be hard without add-with-carry instructions, and it wouldn't be fast.
 
-On the other hand, both the float-based modular multiplication and the Montgomery multiplication are in principle easy to vectorize. The main annoyance comes from the fact that the divisibility check by $p$ starts to become a bottleneck, in comparison to the scalar code where it was only about a 5\% speed loss.
+On the other hand, both the float-based modular multiplication and the Montgomery multiplication are in principle easy to vectorize.
+The main annoyance comes from the fact that the divisibility check by $p$ starts to become a bottleneck, in comparison to the scalar code where it was only about a 5\% speed loss.
+Here is a SIMD version of the float-based modular multiplication:
 
 \begin{lstlisting}
+int cur = 0, nextp = 0; // nextp = p * ceil(cur / p)
+...
+
+const int PAR = 8;
+typedef __m128i mi;
+typedef __m256d md;
+mi msubprod[PAR];
+mi mcur = _mm_setr_epi32(cur, cur + 1, cur + 2, cur + 3);
+rep(i,0,PAR) msubprod[i] = _mm_set1_epi32(1);
+mi ms = _mm_set1_epi32(mod);
+md minv = _mm256_set1_pd(1.0 / mod);
+
+while (nextp < cur) nextp += p;
+mi mnextp = _mm_set1_epi32(nextp - 1);
+mi mp = _mm_set1_epi32(p);
+
+int maxStep = (p == 3 ? 6 : 5) * PAR;
+while (cur + maxStep <= lim) {
+	rep(j,0,PAR) {
+		mi mprod = msubprod[j];
+		mi mnext = _mm_add_epi32(mcur, _mm_set1_epi32(4));
+		cur += 4;
+
+		// Skip over numbers divisible by p. For p = 3 we skip two,
+		// for p = 5 one, and for larger p either zero or one.
+		// This will be a well-predicted branch, and if the
+		// statements within happen to run we trade some cycles for
+		// a longer skip in 'cur'.
+		if (nextp <= cur) {
+			mcur = _mm_sub_epi32(mcur,
+			                     _mm_cmpgt_epi32(mcur, mnextp));
+			mnext = _mm_add_epi32(mnext, _mm_set1_epi32(1));
+			mnextp = _mm_add_epi32(mnextp, mp);
+			nextp += p;
+			cur++;
+			if (p == 3) {
+				mcur = _mm_sub_epi32(mcur,
+				                     _mm_cmpgt_epi32(mcur, mnextp));
+				mnext = _mm_add_epi32(mnext, _mm_set1_epi32(1));
+				mnextp = _mm_add_epi32(mnextp, mp);
+				nextp += p;
+				cur++;
+			}
+		}
+
+		mi mab = _mm_mullo_epi32(mprod, mcur);
+		mi mfl = _mm256_cvttpd_epi32(
+			_mm256_mul_pd(
+				_mm256_mul_pd(minv, _mm256_cvtepi32_pd(mcur)),
+				_mm256_cvtepi32_pd(mprod)
+			)
+		);
+		msubprod[j] = _mm_sub_epi32(mab, _mm_mullo_epi32(ms, mfl));
+		mcur = mnext;
+	}
+}
+rep(i,0,PAR) {
+	union { int i[4]; mi m; } u;
+	u.m = msubprod[i];
+	rep(j,0,4) prod = prod * u.i[j] % mod;
+}
+
+for (; cur < lim; cur++) {
+	int cur2 = (u32)cur * pinv > plim ? cur : 1;
+	prod = modmul((int)prod, cur2, mod);
+}
+prod %= mod;
+if (prod < 0) prod += mod;
 \end{lstlisting}
+
+It runs in 0.728s on input that has $p$ as a large prime,
+and could go down to 0.656s if we managed to get rid of the number-skipping machinery.
+Setting \verb@mod@ to powers of 3, 5, 7, 11 we observe a very similar runtime, indicating that the reduced number of multiplications seems to make up for the complex code within the condition.
+
+The code uses AVX instructions, but no AVX2 ones.
+For comparison, the scalar float-based modmul ran in 2.078s, and the Barrett reduction in 1.246s.
+
+Here is a SIMD version of the Montgomery multiplication, along the same implementation lines but using AVX2:
+\begin{lstlisting}
+int cur = 0, nextp = 0;
+...
+
+const int PAR = 16;
+typedef __m256i mi;
+mi msubprod[PAR];
+rep(i,0,PAR) msubprod[i] = _mm256_set1_epi64x(1);
+mi mcur = _mm256_setr_epi64x(cur, cur + 1, cur + 2, cur + 3);
+mi mnpr = _mm256_set1_epi64x(mont.npr);
+mi mm = _mm256_set1_epi64x(mod);
+int iters = lim - cur;
+
+while (nextp < cur) nextp += p;
+mi mnextp = _mm256_set1_epi64x(nextp - 1);
+mi mp = _mm256_set1_epi64x(p);
+
+int maxStep = (p == 3 ? 6 : 5) * PAR;
+while (cur + maxStep <= lim) {
+	rep(j,0,PAR) {
+		mi mnext = _mm256_add_epi64(mcur, _mm256_set1_epi64x(4));
+		cur += 4;
+
+		if (nextp <= cur) {
+			// (32-bit compare is slightly faster than 64-bit)
+			mcur = _mm256_sub_epi32(mcur,
+			            _mm256_cmpgt_epi32(mcur, mnextp));
+			mnext = _mm256_add_epi64(mnext, _mm256_set1_epi64x(1));
+			mnextp = _mm256_add_epi64(mnextp, mp);
+			nextp += p;
+			cur++;
+			iters--;
+			if (p == 3) {
+				... same thing
+			}
+		}
+
+		mi ma = _mm256_mul_epu32(msubprod[j], mcur);
+		mi mb = _mm256_mul_epu32(ma, mnpr);
+		mi mc = _mm256_add_epi64(ma, _mm256_mul_epu32(mb, mm));
+		msubprod[j] = _mm256_srli_epi64(mc, 32);
+		mcur = mnext;
+	}
+}
+
+rep(i,0,PAR) {
+	union { u64 i[4];  m; } u;
+	u.m = msubprod[i];
+	rep(j,0,4)
+		prod = mont.redc((u64) prod * u.i[j]);
+}
+
+for (; cur < lim; cur++) {
+	u32 cur2 = (u32)cur * pinv > plim ? cur : 1;
+	prod = mont.redc((u64) prod * cur2);
+}
+prod = prod * modpow(2, 32LL * (iters + 4 * PAR), mod) % mod;
+\end{lstlisting}
+
+This runs in 0.455s, or 0.423s without the number-skipping.
+The scalar version ran in 1.367s, so this corresponds to a 3x speed-up, which is pretty good!
+
+\subsection{Summary}
+The following table summarizes the different versions:
+
+\vspace{1mm}
+\noindent
+\begin{tabular}{|l|c|}
+\hline
+Algorithm & Time \\
+\hline
+Naive loop & 20.839s \\
+Optimized divisiblity test & 19.288s \\
+Parallel loop & 10.933s \\
+Barrett reduction & 2.122s \\
+Relaxed Barrett reduction & 1.246s \\
+Float-based & 2.078s \\
+Montgomery & 1.367s \\
+Float-based, SIMD & 0.728s \\
+Montgomery, SIMD & 0.455s \\
+\hline
+\end{tabular}
+\vspace{1mm}
+
+\noindent
+In conclusion, relaxed Barrett reduction is a good default modular reduction algorithm.
+If higher performance is required, one can use vectorized versions to win a factor 2-3; either with
+Montgomery multiplication, which is fast but requires AVX2 and has a complex API, or with
+float-based multiplication.
 
 \chapter{Example: Fibonacci-ish II}
 % concepts: bitsets, using data structures, shuffles
