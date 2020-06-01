@@ -126,6 +126,7 @@ In fact, even with auto-vectorization disabled this trick helps performance, giv
 For fun we can also try writing the loop manually using intrinsics:
 \begin{lstlisting}
 #pragma GCC optimize ("unroll-loops")
+#include <immintrin.h>
 typedef __m128i M;
 ...
 
@@ -188,6 +189,7 @@ so we can look only at ranges with upper bound less than $p^\alpha$.
 Here's an initial attempt:
 
 \begin{lstlisting}
+// Extended Euclidean algorithm and CRT from KACTL
 ll euclid(ll a, ll b, ll &x, ll &y) {
 	if (b) { ll d = euclid(b, a % b, y, x);
 		return y -= a/b * x, d; }
