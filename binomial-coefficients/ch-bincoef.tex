@@ -464,7 +464,7 @@ prod %= mod;
 if (prod < 0) prod += mod;
 \end{lstlisting}
 
-This runs in 2.078s, which is worse than Barrett reduction. However, it's not completely useless -- we could possibly combine the two since integers and floats use different circuitry, and the avoidance of \mbox{$64*64\rightarrow128$}-bit multiplications makes it more amenable to SIMD. Let's get back to this later.
+This runs in 2.078s, which is worse than Barrett reduction. However, it's not completely useless -- we could possibly combine the two since integers and floats use different circuitry, and the avoidance of \mbox{$64*64\rightarrow128$}-bit multiplications makes it more amenable to SIMD.
 
 \subsection{Montgomery multiplication}
 
