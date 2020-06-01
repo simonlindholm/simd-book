@@ -1,0 +1,28 @@
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{framed} % frames around example problems
+\usepackage{relsize} % larger math font size in one place
+\usepackage{listings} % source code listings
+\usepackage{courier} % bold monospace
+\usepackage{mathtools} % DeclarePairedDelimiter
+% \usepackage{ctex} % Chinese characters, takes too long to compile for now
+% \usepackage[scaled=1]{DejaVuSansMono} % alternative monospace font
+
+% lstlisting settings:
+\lstset{
+    language=C++,
+    morekeywords={alignas,alignof,decltype},
+    showstringspaces=false,
+    breaklines=true,
+    tabsize=2,
+    frame=single,
+    basicstyle=\small\ttfamily % or \footnotesize?
+    % commentstyle=\normalfont\itshape
+}
+
+\newcommand{\todo}[1]{\textbf{TODO:} #1}
+\DeclarePairedDelimiter{\floor}{\lfloor}{\rfloor}
+\DeclarePairedDelimiter{\ceil}{\lceil}{\rceil}
+
