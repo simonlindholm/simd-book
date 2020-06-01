@@ -31,7 +31,7 @@ void factor(ll n, F f) {
 }
 
 u32 invp2(u32 x) { // x^-1 mod 2^32
-	unsigned xinv = 1;
+	u32 xinv = 1;
 	rep(i,0,5) xinv = xinv * (2 - x * xinv);
 	return xinv;
 }

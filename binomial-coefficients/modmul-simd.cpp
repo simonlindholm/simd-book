@@ -70,7 +70,7 @@ struct Mont {
 Mont::Mont(unsigned mod) : Mod(mod) {
 	assert(mod & 1);
 	R1Mod = -1U % mod + 1; // 2^32 % mod
-	unsigned xinv = 1;
+	u32 xinv = 1;
 	rep(i,0,5) xinv = xinv * (2 - mod * xinv);
 	assert(xinv * mod == 1);
 	R2Mod = (unsigned)((uint64_t)R1Mod * R1Mod % mod);

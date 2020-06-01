@@ -33,7 +33,7 @@ then modulo arbitrary integers in the range $[1, 10^9]$.
 
 As usual for competitive programming, we shall have
 little regard to portability and assume GCC and x86\_64,
-and use the following file header to keep code size down:
+and use a small file header to keep code size down:
 
 \begin{lstlisting}
 #include <bits/stdc++.h>
@@ -41,6 +41,9 @@ using namespace std;
 
 #define rep(i,f,t) for (int i = (f); i < (t); i++)
 typedef int64_t ll;
+typedef uint32_t u32;
+typedef uint64_t u64;
+typedef __uint128_t u128;
 \end{lstlisting}
 
 The benchmarking performed is highly unscientific,

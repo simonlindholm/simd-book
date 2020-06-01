@@ -21,12 +21,14 @@ Instead, let's take each factorial and write it as $x! = \odd{x}2^{\even{x}}$. T
 
 and the $\odd x$ parts can be computed mod $2^{32}$ instead of requiring arbitrary precision integers.
 We can get formulas for $\odd x$ and $\even x$ by expanding $x!$ as follows: \\
-\begin{tabular}{cccccccccc}
-$x!$&$=$&          &$1$& $\cdot 2$ &$\cdot 3$ &$\cdot 4$ &$\cdot 5$ & $\cdot 6$ & $\cdot \ldots$ \\
-    &$=$&          &$1$&           &$\cdot 3$ &          &$\cdot 5$ &           & $\cdot \ldots$ \\
-    &   &$\cdot 2$(&   & $1$       &          &          &          & $\cdot 3$ & $\cdot \ldots$)\\
-    &   &$\cdot 4$(&   &           &          &  $1$     &          &           & $\cdot \ldots$)\\
-    &   &$\cdot \ldots$ &
+\newcommand{\dig}[1]{\cdot 2 \cdot \mathbf{#1}}
+\begin{tabular}{cccccccccccccc}
+$x!$& $=$ & $1$        & $\cdot 2$ &$\cdot 3$         &$\cdot 4$ & $\cdot 5$         & $\cdot 6$ & $\cdot 7$         & $\cdot 8$ & $\cdot 9$         & $\cdot 10$ & $\cdot \ldots$ \\
+    & $=$ & $\mathbf 1$&           &$\cdot \mathbf 3$ &          & $\cdot \mathbf 5$ &           & $\cdot \mathbf 7$ &           & $\cdot \mathbf 9$ &            & $\cdot \ldots$ \\
+    &     &            & $\dig{1}$ &                  &$\cdot 2$ &                   & $\dig 3$  &                   & $\cdot 2$ &                   & $\dig 5$   & $\cdot \ldots$ \\
+    &     &            &           &                  &$\dig 1$  &                   &           &                   & $\cdot 2$ &                   &            & $\cdot \ldots$ \\
+    &     &            &           &                  &          &                   &           &                   & $\dig 1$  &                   &            & $\cdot \ldots$ \\
+    &     & $\cdot \ldots$ &
 \end{tabular}
 \\
 $\even x$ gets an easy formula: $\sum_{k=1}^\infty \floor{x / 2^k}$.
@@ -42,8 +44,6 @@ Then we get an amortized runtime of $2^{31}$ multiplications, which should be to
 Here is how it looks in code:
 
 \begin{lstlisting}
-typedef uint32_t u32;
-
 u32 modpow(u32 a, ll e) {
 	if (e == 0) return 1;
 	u32 x = modpow(a * a, e >> 1);
@@ -296,7 +296,7 @@ The former would be easy to eliminate by turning the loop into two nested loops,
 
 \begin{lstlisting}
 u32 invp2(u32 x) { // x^-1 mod 2^32
-	unsigned xinv = 1;
+	u32 xinv = 1;
 	rep(i,0,5) xinv = xinv * (2 - x * xinv);
 	return xinv;
 }
@@ -366,8 +366,6 @@ The way it works is by writing $a \% b = a - \floor{a / b} b$, and approximately
 We can then apply a final correction if the resulting approximate value of $a \% b$ is outside the range $[0, b)$.
 Since $b =$ \verb@mod@ will be constant over many multiplications, we can precompute the value of $\floor{(2^{64} - 1) / b}$, turning the work needed for a single modular reduction into just two multiplications, a subtraction and a range correction.
 \begin{lstlisting}
-typedef uint64_t u64;
-typedef __uint128_t u128;
 struct Barrett {
 	u64 b, m;
 	Barrett(u64 b) : b(b), m(-1ULL / b) {}
@@ -466,18 +464,18 @@ prod %= mod;
 if (prod < 0) prod += mod;
 \end{lstlisting}
 
-This runs in 2.078s, which is worse than Barrett reduction. However, it's not completely useless -- we could possibly combine the two since integers and floats use different circuitry, and the avoidance of \mbox{$64*64\rightarrow128$}-bit multiplications makes it more amenable to SIMD.
+This runs in 2.078s, which is worse than Barrett reduction. However, it's not completely useless -- we could possibly combine the two since integer and float operations use different circuitry, and the avoidance of \mbox{$64*64\rightarrow128$}-bit multiplications makes it more amenable to SIMD.
 
 \subsection{Montgomery multiplication}
 
 In comparison to Barrett reduction and the floating-point based modular multiplication, Montgomery multiplication is more complicated.
-The idea is that we take the usual division algorithm that involves subtracting multiples of $b$ from $a$ until we reach the smallest possible non-negative value, and instead turn it around, \emph{adding} multiples of $b$ until we reach the (approximately) smallest possible value that's divisible by $2^{32}$.
+The idea is that we take the usual division algorithm that involves subtracting multiples of $b$ from $a$ until we reach the smallest possible non-negative value, and turn it around, instead \emph{adding} multiples of $b$ until we reach the (approximately) smallest possible value that's divisible by $2^{32}$.
 The number of multiples to add can be computed using a single multiplication.
 We then right-shift by $32$, producing a value congruent to $a / 2^{32} \pmod b$ in the range $[0, 2b)$, which we can range-reduce if we feel like it.
 This operation that computes $a / 2^{32} \pmod b$ is customarily called \verb@redc@.
 We can compensate for the additional factor of $2^{-32} \pmod b$ by pre-multiplying all numbers by $2^{32},$\footnote{
-This is known as putting numbers in Montgomery form, and can be done using \texttt{redc(x, 2\^{}64 \% mod)}.
-The product of two numbers in Montgomery form is another number in Montgomery form, and we get numbers back in regular form using \texttt{redc(x, 1)}.
+This is known as putting numbers in Montgomery form, and can be done using \texttt{redc(x * (2\^{}64 \% mod))}.
+The product of two numbers in Montgomery form is another number in Montgomery form, and we get numbers back in regular form using \texttt{redc(x)}.
 } or by multiplying by $(2^{32})^{\text{\#multiplications}} \pmod b$ at the very end.
 In code:
 
