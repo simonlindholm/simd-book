@@ -9,23 +9,27 @@
 \usepackage{courier} % bold monospace
 \usepackage{mathtools} % DeclarePairedDelimiter
 % \usepackage{ctex} % Chinese characters, takes too long to compile for now
+% \usepackage[scaled=1]{DejaVuSansMono} % alternative monospace font
 
 \bibliographystyle{ieeetr}
 
 % lstlisting settings:
-\lstset{language=C++}
-\lstset{morekeywords={alignas,alignof}}
-\lstset{showstringspaces=false}
-\lstset{breaklines=true}
-\lstset{tabsize=2}
-\lstset{frame=single}
-\lstset{basicstyle=\small\ttfamily} % or \footnotesize?
-% \lstset{commentstyle=\normalfont\itshape}
+\lstset{
+    language=C++,
+    morekeywords={alignas,alignof,decltype},
+    showstringspaces=false,
+    breaklines=true,
+    tabsize=2,
+    frame=single,
+    basicstyle=\small\ttfamily % or \footnotesize?
+    % commentstyle=\normalfont\itshape
+}
 
 \newcommand{\todo}[1]{\textbf{TODO:} #1}
 \DeclarePairedDelimiter{\floor}{\lfloor}{\rfloor}
 \DeclarePairedDelimiter{\ceil}{\lceil}{\rceil}
 
+% Assorted notes:
 % Thanks to:
 % Dandan for AVX-512 and bouncing ideas
 % problemsetters
