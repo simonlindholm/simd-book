@@ -1,4 +1,3 @@
-\chapter{Example: Binomial Coefficients}
 \section{Modulo powers of two}
 \begin{framed}
 \noindent
@@ -322,7 +321,8 @@ On the other hand, if \verb@cur@ is not divisible by $p$, multiplying by the mod
 Hence, \verb@cur % p == 0@ can be replaced by \verb@(u32)cur * pinv <= plim@, multiplication being a much cheaper operation than modulo.
 
 We do need to be careful to treat $p = 2$ specially, since 2 is not invertible mod $2^{32}$.
-However, this special-casing will be needed later on anyway, when we start looking into optimizing the modular multiplication. (By using 64-bit integers, it is possible to write a divisibility check similar to the above that works for both even and odd numbers, see \cite{fastdivcheck}.)
+However, this special-casing will be needed later on anyway, when we start looking into optimizing the modular multiplication.
+(By using 64-bit integers, it is possible to write a divisibility check similar to the above that works for both even and odd numbers, see \cite{fastdivcheck}.)
 
 Performance-wise, this doesn't make much of a difference -- we go from 20.8 seconds to 19.3.
 It seems likely that we are latency-bound.
@@ -520,7 +520,7 @@ prod = prod * modpow(2, 32LL * (iters + PAR), mod) % mod;
 \end{lstlisting}
 This runs in 1.367s. That is again slightly worse than the Barrett reduction, but as with the floating-point modmul, the potential for SIMD is higher since there are no \mbox{$64*64\rightarrow128$}-bit multiplications.
 
-\subsection{SIMDed modular multiplication}
+\subsection{Applying SIMD}
 
 We still have the potential to go further using SIMD.
 Let us consider the different modular multiplication algorithms we have and how we could vectorize them.
@@ -658,7 +658,7 @@ while (cur + maxStep <= lim) {
 }
 
 rep(i,0,PAR) {
-	union { u64 i[4];  m; } u;
+	union { u64 i[4]; mi m; } u;
 	u.m = msubprod[i];
 	rep(j,0,4)
 		prod = mont.redc((u64) prod * u.i[j]);

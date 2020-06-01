@@ -9,10 +9,18 @@ fast: | build
 
 bib: | build
 	bibtex build/book
+	cd binomial-coefficients/ && bibtex build/freestanding
+
+bincoef: | binomial-coefficients/build
+	cd binomial-coefficients/ && pdflatex -output-directory build freestanding.tex </dev/null
+	cp binomial-coefficients/build/freestanding.pdf bincoef.pdf
 
 clean:
-	$(RM) -r build/
+	$(RM) -r build/ binomial-coefficients/
 
 build:
-	mkdir -p build/
+	mkdir -p $@
+
+binomial-coefficients/build:
+	mkdir -p $@
 

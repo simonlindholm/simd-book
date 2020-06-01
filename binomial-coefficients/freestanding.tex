@@ -1,0 +1,29 @@
+\documentclass{article}
+\usepackage{tocbibind} % show bibliography in toc
+\input{../preamble.tex}
+
+\bibliographystyle{ieeetr}
+
+\title{Computing binomial coefficients modulo integers quickly}
+\author{Simon Lindholm}
+\date{2020-06-01}
+
+\begin{document}
+
+\maketitle
+
+\section*{Abstract}
+We compare different techniques for modular multiplications, with a concrete application to computing binomial coefficients.
+
+The paper is written from a competitive programming standpoint, with little regard to portability (all judges run GCC on Intel hardware).
+The benchmarking performed is highly unscientific, with measurements being done on an old laptop running an i5-U4200 Haswell processor,
+and times being eyeballed medians of relatively high-variance measurements.
+That said, the overall conclusions should still be valid, and may be of interest outside of the competitive programming sphere as well.
+
+\tableofcontents
+
+\input{ch-bincoef.tex}
+
+\bibliography{../bibliography}
+
+\end{document}
