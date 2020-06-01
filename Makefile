@@ -1,13 +1,18 @@
 MAKEFLAGS += --no-builtin-rules
+LATEXCMD = pdflatex -output-directory build
 
 .PHONY: fast bib clean
 
-fast:
-	pdflatex book.tex
+fast: | build
+	$(LATEXCMD) book.tex </dev/null
+	cp build/book.pdf book.pdf
 
-bib:
-	bibtex book
+bib: | build
+	bibtex build/book
 
 clean:
-	$(RM) book.{aux,bbl,blg,log,out,pdf,toc}
+	$(RM) -r build/
+
+build:
+	mkdir -p build/
 
