@@ -1,0 +1,703 @@
+\chapter{Example: Binomial Coefficients}
+\section{Modulo powers of two}
+\begin{framed}
+\noindent
+(Russian training camp) Given $N, K$ ($0 \le K \le N \le 10^{18}$), compute
+\[
+\binom N K = \frac{N!}{K!(N-K)!} \pmod {2^{32}}.
+\]
+Time limit: 1 second.
+\end{framed}
+This problem seems to call for some extension of Lucas' theorem to prime powers... but let's ignore that and instead focus our attention on how to compute factorials quickly.
+
+\newcommand{\odd}[1]{#1_\text{odd}}
+\newcommand{\even}[1]{#1_\text{even}}
+
+We can't compute $N!$, $K!$ and $(N-K)!$ straight off modulo $2^{32}$ and then do modular division, because they will be divisible by large powers of two, and division by zero is impossible.
+Instead, let's take each factorial and write it as $x! = \odd{x}2^{\even{x}}$. Then
+\[
+\frac{N!}{K!(N-K)!} =
+\frac{\odd N}{\odd K \odd{(N-K)}} \cdot \mathlarger{2^{\even N - \even K - \even{(N-K)}}},
+\]
+
+and the $\odd x$ parts can be computed mod $2^{32}$ instead of requiring arbitrary precision integers.
+We can get formulas for $\odd x$ and $\even x$ by expanding $x!$ as follows: \\
+\begin{tabular}{cccccccccc}
+$x!$&$=$&          &$1$& $\cdot 2$ &$\cdot 3$ &$\cdot 4$ &$\cdot 5$ & $\cdot 6$ & $\cdot \ldots$ \\
+    &$=$&          &$1$&           &$\cdot 3$ &          &$\cdot 5$ &           & $\cdot \ldots$ \\
+    &   &$\cdot 2$(&   & $1$       &          &          &          & $\cdot 3$ & $\cdot \ldots$)\\
+    &   &$\cdot 4$(&   &           &          &  $1$     &          &           & $\cdot \ldots$)\\
+    &   &$\cdot \ldots$ &
+\end{tabular}
+\\
+$\even x$ gets an easy formula: $\sum_{k=1}^\infty \floor{x / 2^k}$.
+For $\odd x$, we get a decomposition into a number of odd double factorials $k!! = 1 \cdot 3 \cdot 5 \cdot \ldots \cdot k$.
+
+As it turns out, $1 \cdot 3 \cdot \ldots \cdot (2^{32}-1) = 1 \pmod{2^{32}}$, so $k!! = (k \mod 2^{32})!! \pmod{2^{32}}$.
+
+Now, we could try to compute all the double factorials with bruteforce, but it would be a bit too costly -- there are up to $3 \cdot \log_2{10^{18}}$ of them.
+But we can be a bit smarter, by reusing parts of the products.
+Let's partition the numbers $1, 3, \dots, 2^{32}-1$ into intervals that affect the same double factorials.
+Then we get an amortized runtime of $2^{31}$ multiplications, which should be totally doable in 1 second.
+(Note that arithmetic mod $2^{32}$ is fast, because it can make use of integer overflow.)
+Here is how it looks in code:
+
+\begin{lstlisting}
+typedef uint32_t u32;
+
+u32 modpow(u32 a, ll e) {
+	if (e == 0) return 1;
+	u32 x = modpow(a * a, e >> 1);
+	return e & 1 ? x * a : x;
+}
+
+u32 solve(ll N, ll K) {
+	ll trailingZeroes = 0;
+	map<u32, int> ivs;
+	int accMult = 0;
+	rep(i,0,3) {
+		ll x = (i == 0 ? N : i == 1 ? K : N-K);
+		int mult = (i == 0 ? 1 : -1);
+		while (x > 0) {
+			// Include the product (1 * 3 * ... * (x % 2^32))
+			// in the answer, 'mult' times.
+			ivs[(u32)x + 1] += mult;
+			accMult += mult;
+			x /= 2;
+			trailingZeroes += x * mult;
+		}
+	}
+
+	u32 cur = 0, res = 1, resdiv = 1;
+	for (auto pa : ivs) {
+		u32 lim = pa.first, ilim = lim / 2;
+		// The odd numbers in the range [last lim, lim) get
+		// included 'accMult' times in the answer -- 'pa.second'
+		// times for the interval ending at 'lim', and also for
+		// all larger intervals. We divide the loop counter by 2
+		// to avoid potential overflows.
+		u32 prod = 1;
+		for (; cur < ilim; cur++)
+			prod *= cur * 2 + 1;
+		if (accMult > 0) res *= modpow(prod, accMult);
+		else resdiv *= modpow(prod, -accMult);
+		accMult -= pa.second;
+	}
+
+	res *= modpow(2, trailingZeroes);
+	res *= modpow(resdiv, (1LL << 31) - 1);
+	return res;
+}
+\end{lstlisting}
+
+Running this locally on worst-case input (e.g. $n = 2^{59}-2$, $k$ randomly keyboard mashed, to trigger a loop over the full range $[1, 2^{32}-1]$) results in a time of 2.601s. Not great...
+
+Let's add some auto-vectorization (SSE 4.1, to match the judge's hardware):
+\begin{lstlisting}
+#pragma GCC optimize ("O3")
+#pragma GCC target ("sse4.1")
+\end{lstlisting}
+
+New time: 2.141s. That's better, but not good. What's going on?
+If we experiment locally by changing \verb@sse4.1@ to \verb@avx2@ it gives a time of 1.065s.
+This is exactly what we would expect if the code was auto-vectorized and the vector width doubled with AVX2.
+A hypothesis we can make from this is that the code \emph{was} auto-vectorized into operating on 4 u32's at once, but that the loop is completely latency-bound, and the added latency of \verb@pmulld@ (\verb@_mm_mullo_epi32@) over \verb@imul@ (normal multiplication) compensated for the increased throughput.
+(Agner's instruction tables seem to agree with this hypothesis -- imul is listed as having 3 cycles of latency on Skylake, while pmulld has 10.)
+If that's the case, we should be able to make it throughput-bound and increase performance by keeping a bunch of simultaneous loop counters.
+Let's try it:
+
+\begin{lstlisting}
+const int PAR = 8;
+u32 subprod[PAR] = {1,1,1,1,1,1,1,1};
+u32 cur2 = cur * 2 + 1;
+for (; cur + PAR < ilim; cur += PAR, cur2 += PAR*2) {
+	rep(i,0,PAR) subprod[i] *= cur2 + 2*i;
+}
+u32 prod = 1;
+rep(i,0,PAR) prod *= subprod[i];
+for (; cur < ilim; cur++) {
+	prod *= cur * 2 + 1;
+}
+\end{lstlisting}
+
+0.434s! That's better, and enough to get Accepted on the problem.
+With an \verb@avx2@ target pragma it goes down further to 0.225s.
+In fact, even with auto-vectorization disabled this trick helps performance, giving 0.853s.
+
+For fun we can also try writing the loop manually using intrinsics:
+\begin{lstlisting}
+#pragma GCC optimize ("unroll-loops")
+typedef __m128i M;
+...
+
+const int PAR = 8;
+M madd = _mm_set1_epi32(PAR * 8);
+M msubprod[PAR], mcur2[PAR];
+rep(i,0,PAR) {
+	msubprod[i] = _mm_set1_epi32(1);
+	mcur2[i] = _mm_setr_epi32(
+	    2*cur + 8*i + 1, 2*cur + 8*i + 3,
+	    2*cur + 8*i + 5, 2*cur + 8*i + 7);
+}
+for (; cur + PAR * 4 < ilim; cur += PAR * 4) {
+	rep(i,0,PAR) {
+		msubprod[i] = _mm_mullo_epi32(msubprod[i], mcur2[i]);
+		mcur2[i] = _mm_add_epi32(mcur2[i], madd);
+	}
+}
+u32 prod = 1;
+union {
+	M mprod;
+	u32 parts[4];
+} u;
+u.mprod = _mm_set1_epi32(1);
+rep(i,0,PAR) u.mprod = _mm_mullo_epi32(u.mprod, msubprod[i]);
+rep(i,0,4) prod *= u.parts[i];
+for (; cur < ilim; cur++) {
+	prod *= cur * 2 + 1;
+}
+\end{lstlisting}
+
+This gives a runtime of 0.442s; roughly the same as auto-vectorization.
+
+\section{Modulo arbitrary numbers}
+
+Let's make life more difficult on ourselves.
+
+\begin{framed}
+\noindent
+Given $N, K, M$ ($0 \le K \le N \le 10^{18}$, $1 \le M \le 10^9$), compute
+\[
+\binom N K = \frac{N!}{K!(N-K)!} \pmod {M}.
+\]
+Time limit: 1 second.
+\end{framed}
+
+Our approach to this will be similar to that of powers of two.
+We can start by factoring $M = \prod p^\alpha$, and solve the problem modulo each prime power, piecing the results together using the Chinese remainder theorem.
+For each prime power $p^\alpha$, we decompose $N!$, $K!$ and $(N-K)!$ into powers of $p$ and products of ranges $[1, k]$ with numbers divisible by $p$ excluded.
+The product of a whole interval $[1, p^\alpha]$ is $1$ if $p = 2, \alpha \ge 3$, else $-1$,\footnote{
+This isn't really necessary to the implementation, since we could just as well compute the product of a whole interval using a brute-force loop. But it's a fun excuse to do math.
+
+If $\alpha = 1$, Wilson's theorem says that $(p-1)! = -1 \pmod{p}$, and has an easy proof: rearrange the product $1 \cdot 2 \cdot \ldots \cdot (p-1)$ to group $x$ together with $x^{-1}$; this will get rid of all factors except the ones that are their own inverse. Solving $x = x^{-1}$, or equivalently $x^2 = 1$, yields just two solutions $x = \pm 1$, and so $(p-1)! = 1 \cdot (-1) = -1\pmod{p}$. An easy way of seeing that there aren't more solutions to $x^2 = 1$ is that a degree two polynomial can only have two roots.
+
+For $p = 2$ we can compute the results for $\alpha = 2, 3$ by hand: $\alpha = 2$ gives a product $1 \cdot 3 = -1$, and $\alpha = 3$ gives $1 \cdot 3 \cdot 5 \cdot 7 = 1$. For larger $\alpha$ we can use the Wilson argument together with induction on the fact that $x^2 = 1$ has four solutions $1$, $-1$, $2^{\alpha-1} - 1$, $2^{\alpha-1} + 1$.
+
+For $p > 2$ we can solve $x^2 = 1 \pmod{p^\alpha}$ using Hensel lifting: a root $x$ to the polynomial mod $p$ lifts to exactly one corresponding root mod higher powers of $p$ since the derivative $2x$ is non-zero for $p > 2$. Hence, $\pm 1$ are the only roots to $x^2 = 1 \pmod{p^\alpha}$, and we can apply the Wilson argument.
+}
+so we can look only at ranges with upper bound less than $p^\alpha$.
+Here's an initial attempt:
+
+\begin{lstlisting}
+ll euclid(ll a, ll b, ll &x, ll &y) {
+	if (b) { ll d = euclid(b, a % b, y, x);
+		return y -= a/b * x, d; }
+	return x = 1, y = 0, a;
+}
+
+ll crt(ll a, ll m, ll b, ll n) {
+	if (n > m) swap(a, b), swap(m, n);
+	ll x, y, g = euclid(m, n, x, y);
+	assert((a - b) % g == 0); // else no solution
+	x = (b - a) % n * x % n / g * m + a;
+	return x < 0 ? x + m*n/g : x;
+}
+
+template<class F>
+void factor(ll n, F f) {
+	for (ll p = 2; p*p <= n; p++) {
+		int a = 0;
+		while (n % p == 0) n /= p, a++;
+		if (a > 0) f(p, a);
+	}
+	if (n > 1) f(n, 1);
+}
+
+ll modpow(ll a, ll e, ll m) {
+	if (e == 0) return 1;
+	ll x = modpow(a * a % m, e >> 1, m);
+	return e & 1 ? x * a % m : x;
+}
+
+// N choose K modulo p^a
+ll solve(ll N, ll K, int p, int a) {
+	int mod = 1, acc = 0;
+	rep(i,0,a) mod *= p;
+	ll trailingZeroes = 0, res = 1, resdiv = 1;
+	map<int, int> ivs;
+	rep(i,0,3) {
+		ll x = (i == 0 ? N : i == 1 ? K : N-K);
+		int mult = (i == 0 ? 1 : -1);
+		while (x > 0) {
+			// Include the product (1 * 2 * ... * x) in the answer,
+			// 'mult' times, with numbers divisible by p excluded.
+			ll lim = x + 1;
+			ivs[(int)(lim % mod)] += mult;
+			if (lim / mod % 2 == 1 && (mod == 4 || p > 2))
+				res *= -1;
+			acc += mult;
+			x /= p;
+			trailingZeroes += x * mult;
+		}
+	}
+
+	int cur = 1;
+	for (auto pa : ivs) {
+		int lim = pa.first;
+		ll prod = 1;
+		for (; cur < lim; cur++) {
+			if (cur % p != 0)
+				prod = prod * cur % mod;
+		}
+		if (acc > 0) res = res * modpow(prod, acc, mod) % mod;
+		else resdiv = resdiv * modpow(prod, -acc, mod) % mod;
+		acc -= pa.second;
+	}
+
+	res = res * modpow(p, trailingZeroes, mod) % mod;
+	res = res * modpow(resdiv, mod - mod/p - 1, mod) % mod;
+	return res;
+}
+
+// N choose K modulo M
+ll solve(ll N, ll K, ll M) {
+	ll res = 0, prod = 1;
+	factor(M, [&](ll p, int a) {
+		ll r = solve(N, K, (int)p, a), m = 1;
+		rep(i,0,a) m *= p;
+		res = crt(res, prod, r, m);
+		prod *= m;
+	});
+	return res;
+}
+
+void test() {
+	vector<vector<int>> binom(100, vector<int>(100, -1));
+	rep(m,1,100) rep(n,0,100) rep(k,0,n+1) {
+		if (k == 0 || k == n) binom[n][k] = 1 % m;
+		else binom[n][k] = (binom[n-1][k-1] + binom[n-1][k]) % m;
+		assert(solve(n, k, m) == binom[n][k]);
+	}
+}
+\end{lstlisting}
+
+Runtime is an abysmal 20.839s, but it works.
+Let us focus on the innermost loop:
+\begin{lstlisting}
+for (; cur < lim; cur++) {
+  if (cur % p != 0)
+    prod = prod * cur % mod;
+}
+\end{lstlisting}
+
+There are two things that are slow: the divisibility check by \texttt{p}, and the modular multiplication.
+The former would be easy to eliminate by turning the loop into two nested loops, with the innermost looping from $1$ to $p-1$, however, in the interest of keeping the code short we will start by using another trick:
+
+\begin{lstlisting}
+u32 invp2(u32 x) { // x^-1 mod 2^32
+	unsigned xinv = 1;
+	rep(i,0,5) xinv = xinv * (2 - x * xinv);
+	return xinv;
+}
+...
+
+u32 pinv = invp2(p);
+u32 plim = 0xFFFFFFFF / p;
+...
+
+if (p == 2) {
+  u32 prod2 = ... product mod 2^32 as before
+  prod = prod2 % mod;
+} else {
+  for (; cur < lim; cur++) {
+    if ((u32)cur * pinv > plim)
+      prod = prod * cur % mod;
+  }
+}
+\end{lstlisting}
+
+If \verb@cur@ is divisible by $p$, dividing will result in a number in the range $[0, (2^{32}-1) / p]$.
+We can compute this result by multiplying by the modular inverse of $p \pmod{2^{32}}$.
+On the other hand, if \verb@cur@ is not divisible by $p$, multiplying by the modular inverse of $p$ cannot result in a number in that range, since that multiplication is invertible and already has a pre-image (given by multiplication by $p$).
+Hence, \verb@cur % p == 0@ can be replaced by \verb@(u32)cur * pinv <= plim@, multiplication being a much cheaper operation than modulo.
+
+We do need to be careful to treat $p = 2$ specially, since 2 is not invertible mod $2^{32}$.
+However, this special-casing will be needed later on anyway, when we start looking into optimizing the modular multiplication. (By using 64-bit integers, it is possible to write a divisibility check similar to the above that works for both even and odd numbers, see \cite{fastdivcheck}.)
+
+Performance-wise, this doesn't make much of a difference -- we go from 20.8 seconds to 19.3.
+It seems likely that we are latency-bound.
+To avoid this latency bottleneck, let's do as before and use multiple accumulators:
+
+\begin{lstlisting}
+const int PAR = 2;
+ll subprod[PAR] = {1,1};
+while (cur + PAR <= lim) {
+	rep(i,0,PAR) {
+		if ((u32)cur * pinv > plim)
+			subprod[i] = subprod[i] * cur % mod;
+		cur++;
+	}
+}
+rep(i,0,PAR) prod = prod * subprod[i] % mod;
+for (; cur < lim; cur++) {
+	if ((u32)cur * pinv > plim)
+		prod = prod * cur % mod;
+}
+\end{lstlisting}
+
+This gives us a (still pretty awful) runtime of 11.848s.
+Making the divisibility check branchless by doing
+\begin{lstlisting}
+subprod[i] * ((u32)cur * pinv > plim ? cur : 1) % mod;
+\end{lstlisting}
+improves it further to 10.933s (10.391s with no divisibility check at all).
+Raising \verb@PAR@ further makes performance worse, and turning on -O3 makes no difference.
+Newer processor architectures are somewhat faster at division than the Haswell I'm benchmarking on, but even with a judge running on ultra-modern hardware we would be pretty far from the 1 second goal.
+
+So... where do we go from here?
+We can't turn to SIMD, because there's no SIMD integer division or modulo instruction.
+Well, what we \emph{can} do is roll our own modular multiplication.
+
+\subsection{Barrett reduction}
+One way of doing modular reduction quickly is by using Barrett reduction.
+The way it works is by writing $a \% b = a - \floor{a / b} b$, and approximately computing the value of $\floor{a / b}$ as $\floor{(\floor{(2^{64} - 1) / b} \cdot a) / 2^{64}}$.
+We can then apply a final correction if the resulting approximate value of $a \% b$ is outside the range $[0, b)$.
+Since $b =$ \verb@mod@ will be constant over many multiplications, we can precompute the value of $\floor{(2^{64} - 1) / b}$, turning the work needed for a single modular reduction into just two multiplications, a subtraction and a range correction.
+\begin{lstlisting}
+typedef uint64_t u64;
+typedef __uint128_t u128;
+struct Barrett {
+	u64 b, m;
+	Barrett(u64 b) : b(b), m(-1ULL / b) {}
+	u64 reduce(u64 a) {
+		u64 q = (u64)((u128(m) * a) >> 64), r = a - q * b;
+		return r - b * (r >= b);
+	}
+};
+\end{lstlisting}
+
+Note that while we appear to use 128-bit arithmetic in the \verb@reduce@ function, which seems slow, the x86 instruction set actually has an instruction for \mbox{$64*64\rightarrow128$} bit multiplication, making the computation of \verb@q@ into a single instruction.
+(Other instruction sets commonly also have this sort of operation -- it's useful for implementing arbitrary precision integers.)
+
+The given Barrett reduction implementation is valid for all 64-bit integers $a \ge 0, b > 0$. This follows from a few lines of algebra:
+\begin{itemize}
+\item $r \ge 0$: $a - \floor{(\floor{ (2^{64} - 1) / b} \cdot a)/2^{64}} \cdot b \ge a - ((((2^{64} - 1) / b) \cdot a)/2^{64}) \cdot b = a / 2^{64} \ge 0$.
+\item $r < 2b$: $a - \floor{(\floor{ (2^{64} - 1) / b} \cdot a)/2^{64}} \cdot b < a - ((\floor{ (2^{64} - 1) / b} \cdot a)/2^{64} - 1) \cdot b \le a - ((((2^{64} - 1) / b - (b - 1) / b) \cdot a)/2^{64} - 1) \cdot b = b (1 + a/2^{64}) < 2b$.
+\item Finally, none of the computations overflow.
+\end{itemize}
+
+Let us rewrite the factorial loop using the above Barrett reduction:
+\begin{lstlisting}
+#pragma GCC optimize("O3")
+...
+
+Barrett ba(mod);
+...
+
+const int PAR = 16;
+u64 subprod[PAR];
+rep(i,0,PAR) subprod[i] = 1;
+while (cur + PAR <= lim) {
+	rep(j,0,PAR) {
+		u64 cur2 = (u32)cur * pinv > plim ? cur : 1;
+		subprod[j] = ba.reduce(subprod[j] * cur2);
+		cur++;
+	}
+}
+rep(i,0,PAR) prod = ba.reduce(prod * subprod[i]);
+for (; cur < lim; cur++) {
+	u64 cur2 = (u32)cur * pinv > plim ? cur : 1;
+	prod = ba.reduce(prod * cur2);
+}
+\end{lstlisting}
+This runs in 2.122s, which quite a lot better than before!
+As a side note, Barrett reduction corresponds roughly to what compilers do to optimize \verb@a % b@ where \verb@b@ is a compile-time constant.
+
+\subsection{Relaxed Barrett reduction}
+The step in the Barrett reduction where we reduce the result into $[0, b)$ is nice for giving an answer in canonical form, but it is a bit unnecessarily slow.
+If we accept working with numbers in the range $[0, 2b)$, we can skip that part and do a reduction only at the end:
+\begin{lstlisting}
+u64 reduce(u64 a) {
+	return a - (u64)((u128(m) * a) >> 64) * b;
+}
+...
+
+prod %= mod;
+\end{lstlisting}
+1.246s! Nice.
+In reference to the side note from before, this is actually \emph{faster} than what the compiler would have produced with the naive version if \verb@mod@ was constant, which is a cool feat.
+
+\subsection{Floating-point modmul}
+
+Similarly to the idea behind Barrett reduction, we can compute $a / b$ approximately using floating point numbers, and use that to get a good enough \verb@a % b@, in the range $(-(1+\epsilon)b, (1+\epsilon)b)$. We combine multiplication and reduction in order to keep to 32-bit integers, making use of integer overflow:
+
+\begin{lstlisting}
+int modmul(int a, int b, int m) {
+	return (int)((u32)a * b - (u32)(int)(1.0 / m * a * b) * m);
+}
+\end{lstlisting}
+
+There is still precomputation happening here, but it's a bit harder to spot: it's done automatically by the compiler which recognizes that \verb@1.0 / m@ is constant across loop iterations.
+
+To get a sense of the range in which the modular multiplication works, let us without loss of generality assume $a,b \ge 0$ (negative numbers just negate the result), and look at an upper bound for
+\[ ab - \floor{ r(r(r(1/m)\cdot a)\cdot b)} \cdot m \]
+where $r(x)$ denotes rounding $x$ to the nearest double.
+$r(x)$ obeys $|r(x) - x| \le x \cdot 2^{-53}$, so we get
+\begin{align*}
+ab - \floor{ r(r(r(1/m)\cdot a)\cdot b)} \cdot m
+&< ab - (r(r(r(1/m)\cdot a)\cdot b) - 1) \cdot m \\
+&\le ab - (ab/m \cdot (1 - 2^{-53})^3 - 1) \cdot m \\
+&\le m + 3ab \cdot 2^{-53}.
+\end{align*}
+Hence, as long as $3|ab| < 0.01 c m \cdot 2^{53}$ the result will fall within $(-1.01m, 1.01m)$, and if $|a|,|b| \le 1.01 m$ and $m < 2^{31} / 1.01$, that inequality certainly holds and nor will the output overflow. If not for using 32-bit integers as input parameters, we would be able to go higher, up to $2^{51}$ or so. For a more thorough analysis on the same subject, see \cite{modmulproof}.
+
+Let's try using this for our program:
+
+\begin{lstlisting}
+const int PAR = 16;
+... parallel loop elided
+for (; cur < lim; cur++) {
+	int cur2 = (u32)cur * pinv > plim ? cur : 1;
+	prod = modmul((int)prod, cur2, mod);
+}
+prod %= mod;
+if (prod < 0) prod += mod;
+\end{lstlisting}
+
+This runs in 2.078s, which is worse than Barrett reduction. However, it's not completely useless -- we could possibly combine the two since integers and floats use different circuitry, and the avoidance of \mbox{$64*64\rightarrow128$}-bit multiplications makes it more amenable to SIMD. Let's get back to this later.
+
+\subsection{Montgomery multiplication}
+
+In comparison to Barrett reduction and the floating-point based modular multiplication, Montgomery multiplication is more complicated.
+The idea is that we take the usual division algorithm that involves subtracting multiples of $b$ from $a$ until we reach the smallest possible non-negative value, and instead turn it around, \emph{adding} multiples of $b$ until we reach the (approximately) smallest possible value that's divisible by $2^{32}$.
+The number of multiples to add can be computed using a single multiplication.
+We then right-shift by $32$, producing a value congruent to $a / 2^{32} \pmod b$ in the range $[0, 2b)$, which we can range-reduce if we feel like it.
+This operation that computes $a / 2^{32} \pmod b$ is customarily called \verb@redc@.
+We can compensate for the additional factor of $2^{-32} \pmod b$ by pre-multiplying all numbers by $2^{32},$\footnote{
+This is known as putting numbers in Montgomery form, and can be done using \texttt{redc(x, 2\^{}64 \% mod)}.
+The product of two numbers in Montgomery form is another number in Montgomery form, and we get numbers back in regular form using \texttt{redc(x, 1)}.
+} or by multiplying by $(2^{32})^{\text{\#multiplications}} \pmod b$ at the very end.
+In code:
+
+\begin{lstlisting}
+struct Mont {
+	u32 m, npr; // npr = -(m^-1) mod 2^32
+
+	Mont(u32 mod) : m(mod), npr(-invp2(mod)) {}
+
+	u32 redc(u64 a) {
+		u32 b = (u32)a * npr;
+		u64 c = a + (u64)b * m;
+		return (u32)(c >> 32);
+	}
+};
+\end{lstlisting}
+
+To see that it works, observe that:
+\begin{itemize}
+  \item $c = a + a \cdot (-m^{-1}) \cdot m = 0 \pmod{2^{32}}$
+  \item $c = a \pmod{m}$
+  \item $c/2^{32} \ge 0$
+  \item $c/2^{32} < a/2^{32} + m$
+\end{itemize}
+Hence, as long as $a < m\cdot 2^{32}$, the result will end up in $[0, 2\cdot m)$.
+
+This method only works if the modulus is odd, since it depends on the existence of $m^{-1} \pmod{2^{32}}$. In our case, we have ensured this by special-casing $p = 2$.
+
+Let us apply this to our program, as usual:
+\begin{lstlisting}
+const int PAR = 4;
+u32 subprod[PAR];
+rep(i,0,PAR) subprod[i] = 1;
+int iters = lim - cur;
+... parallel loop elided
+rep(i,0,PAR) prod = mont.redc((u64)prod * subprod[i]);
+for (; cur < lim; cur++) {
+	u32 cur2 = (u32)cur * pinv > plim ? cur : 1;
+	prod = mont.redc((u64)prod * cur2);
+}
+prod = prod * modpow(2, 32LL * (iters + PAR), mod) % mod;
+\end{lstlisting}
+This runs in 1.367s. That is again slightly worse than the Barrett reduction, but as with the floating-point modmul, the potential for SIMD is higher since there are no \mbox{$64*64\rightarrow128$}-bit multiplications.
+
+\subsection{SIMDed modular multiplication}
+
+We still have the potential to go further using SIMD.
+Let us consider the different modular multiplication algorithms we have and how we could vectorize them.
+
+As alluded to, the Barrett reduction is hard to vectorize, because the x86 SIMD instruction set is missing an \mbox{$64*64\rightarrow128$}-bit multiplier.
+The relevant instructions that do exist are \verb@_mm_mullo_epi32@ (\mbox{$32*32\rightarrow32$}-bit multiplication), \verb@_mm_mul_epi32@ (signed \mbox{$32*32\rightarrow64$}-bit multiplication, using the bottom $32$ bits of each 64-bit lane) and \verb@_mm_mul_epu32@ (unsigned \mbox{$32*32\rightarrow64$}-bit multiplication).
+We could potentially create a \mbox{$64*64\rightarrow128$}-bit multiplier out of these, but it would be hard without add-with-carry instructions, and it wouldn't be fast.
+
+On the other hand, both the float-based modular multiplication and the Montgomery multiplication are in principle easy to vectorize.
+The main annoyance comes from the fact that the divisibility check by $p$ starts to become a bottleneck, in comparison to the scalar code where it was only about a 5\% speed loss.
+Here is a SIMD version of the float-based modular multiplication:
+
+\begin{lstlisting}
+int cur = 0, nextp = 0; // nextp = p * ceil(cur / p)
+...
+
+const int PAR = 8;
+typedef __m128i mi;
+typedef __m256d md;
+mi msubprod[PAR];
+mi mcur = _mm_setr_epi32(cur, cur + 1, cur + 2, cur + 3);
+rep(i,0,PAR) msubprod[i] = _mm_set1_epi32(1);
+mi ms = _mm_set1_epi32(mod);
+md minv = _mm256_set1_pd(1.0 / mod);
+
+while (nextp < cur) nextp += p;
+mi mnextp = _mm_set1_epi32(nextp - 1);
+mi mp = _mm_set1_epi32(p);
+
+int maxStep = (p == 3 ? 6 : 5) * PAR;
+while (cur + maxStep <= lim) {
+	rep(j,0,PAR) {
+		mi mprod = msubprod[j];
+		mi mnext = _mm_add_epi32(mcur, _mm_set1_epi32(4));
+		cur += 4;
+
+		// Skip over numbers divisible by p. For p = 3 we skip two,
+		// for p = 5 one, and for larger p either zero or one.
+		// This will be a well-predicted branch, and if the
+		// statements within happen to run we trade some cycles for
+		// a longer skip in 'cur'.
+		if (nextp <= cur) {
+			mcur = _mm_sub_epi32(mcur,
+			                     _mm_cmpgt_epi32(mcur, mnextp));
+			mnext = _mm_add_epi32(mnext, _mm_set1_epi32(1));
+			mnextp = _mm_add_epi32(mnextp, mp);
+			nextp += p;
+			cur++;
+			if (p == 3) {
+				mcur = _mm_sub_epi32(mcur,
+				                     _mm_cmpgt_epi32(mcur, mnextp));
+				mnext = _mm_add_epi32(mnext, _mm_set1_epi32(1));
+				mnextp = _mm_add_epi32(mnextp, mp);
+				nextp += p;
+				cur++;
+			}
+		}
+
+		mi mab = _mm_mullo_epi32(mprod, mcur);
+		mi mfl = _mm256_cvttpd_epi32(
+			_mm256_mul_pd(
+				_mm256_mul_pd(minv, _mm256_cvtepi32_pd(mcur)),
+				_mm256_cvtepi32_pd(mprod)
+			)
+		);
+		msubprod[j] = _mm_sub_epi32(mab, _mm_mullo_epi32(ms, mfl));
+		mcur = mnext;
+	}
+}
+rep(i,0,PAR) {
+	union { int i[4]; mi m; } u;
+	u.m = msubprod[i];
+	rep(j,0,4) prod = prod * u.i[j] % mod;
+}
+
+for (; cur < lim; cur++) {
+	int cur2 = (u32)cur * pinv > plim ? cur : 1;
+	prod = modmul((int)prod, cur2, mod);
+}
+prod %= mod;
+if (prod < 0) prod += mod;
+\end{lstlisting}
+
+It runs in 0.728s on input that has $p$ as a large prime,
+and could go down to 0.656s if we managed to get rid of the number-skipping machinery.
+Setting \verb@mod@ to powers of 3, 5, 7, 11 we observe a very similar runtime, indicating that the reduced number of multiplications seems to make up for the complex code within the condition.
+
+The code uses AVX instructions, but no AVX2 ones.
+For comparison, the scalar float-based modmul ran in 2.078s, and the Barrett reduction in 1.246s.
+
+Here is a SIMD version of the Montgomery multiplication, along the same implementation lines but using AVX2:
+\begin{lstlisting}
+int cur = 0, nextp = 0;
+...
+
+const int PAR = 16;
+typedef __m256i mi;
+mi msubprod[PAR];
+rep(i,0,PAR) msubprod[i] = _mm256_set1_epi64x(1);
+mi mcur = _mm256_setr_epi64x(cur, cur + 1, cur + 2, cur + 3);
+mi mnpr = _mm256_set1_epi64x(mont.npr);
+mi mm = _mm256_set1_epi64x(mod);
+int iters = lim - cur;
+
+while (nextp < cur) nextp += p;
+mi mnextp = _mm256_set1_epi64x(nextp - 1);
+mi mp = _mm256_set1_epi64x(p);
+
+int maxStep = (p == 3 ? 6 : 5) * PAR;
+while (cur + maxStep <= lim) {
+	rep(j,0,PAR) {
+		mi mnext = _mm256_add_epi64(mcur, _mm256_set1_epi64x(4));
+		cur += 4;
+
+		if (nextp <= cur) {
+			// (32-bit compare is slightly faster than 64-bit)
+			mcur = _mm256_sub_epi32(mcur,
+			            _mm256_cmpgt_epi32(mcur, mnextp));
+			mnext = _mm256_add_epi64(mnext, _mm256_set1_epi64x(1));
+			mnextp = _mm256_add_epi64(mnextp, mp);
+			nextp += p;
+			cur++;
+			iters--;
+			if (p == 3) {
+				... same thing
+			}
+		}
+
+		mi ma = _mm256_mul_epu32(msubprod[j], mcur);
+		mi mb = _mm256_mul_epu32(ma, mnpr);
+		mi mc = _mm256_add_epi64(ma, _mm256_mul_epu32(mb, mm));
+		msubprod[j] = _mm256_srli_epi64(mc, 32);
+		mcur = mnext;
+	}
+}
+
+rep(i,0,PAR) {
+	union { u64 i[4];  m; } u;
+	u.m = msubprod[i];
+	rep(j,0,4)
+		prod = mont.redc((u64) prod * u.i[j]);
+}
+
+for (; cur < lim; cur++) {
+	u32 cur2 = (u32)cur * pinv > plim ? cur : 1;
+	prod = mont.redc((u64) prod * cur2);
+}
+prod = prod * modpow(2, 32LL * (iters + 4 * PAR), mod) % mod;
+\end{lstlisting}
+
+This runs in 0.455s, or 0.423s without the number-skipping.
+The scalar version ran in 1.367s, so this corresponds to a 3x speed-up, which is pretty good!
+
+\subsection{Summary}
+The following table summarizes the different versions:
+
+\vspace{1mm}
+\noindent
+\begin{tabular}{|l|c|}
+\hline
+Algorithm & Time \\
+\hline
+Naive loop & 20.839s \\
+Optimized divisiblity test & 19.288s \\
+Parallel loop & 10.933s \\
+Barrett reduction & 2.122s \\
+Relaxed Barrett reduction & 1.246s \\
+Float-based & 2.078s \\
+Montgomery & 1.367s \\
+Float-based, SIMD & 0.728s \\
+Montgomery, SIMD & 0.455s \\
+\hline
+\end{tabular}
+\vspace{1mm}
+
+\noindent
+In conclusion, relaxed Barrett reduction is a good default modular reduction algorithm.
+If higher performance is required, one can use vectorized versions to win a factor 2-3; either with
+Montgomery multiplication, which is fast but requires AVX2 and has a complex API, or with
+float-based multiplication.
