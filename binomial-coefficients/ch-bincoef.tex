@@ -11,6 +11,7 @@ This problem seems to call for some extension of Lucas' theorem to prime powers.
 
 \newcommand{\odd}[1]{#1_\text{odd}}
 \newcommand{\even}[1]{#1_\text{even}}
+\newcommand{\dig}[1]{\cdot 2 \cdot \mathbf{#1}}
 
 We can't compute $N!$, $K!$ and $(N-K)!$ straight off modulo $2^{32}$ and then do modular division, because they will be divisible by large powers of two, and division by zero is impossible.
 Instead, let's take each factorial and write it as $x! = \odd{x}2^{\even{x}}$. Then
@@ -20,17 +21,22 @@ Instead, let's take each factorial and write it as $x! = \odd{x}2^{\even{x}}$. T
 \]
 
 and the $\odd x$ parts can be computed mod $2^{32}$ instead of requiring arbitrary precision integers.
-We can get formulas for $\odd x$ and $\even x$ by expanding $x!$ as follows: \\
-\newcommand{\dig}[1]{\cdot 2 \cdot \mathbf{#1}}
+We can get formulas for $\odd x$ and $\even x$ by expanding $x!$ as follows:
+
+\medskip
+
+\noindent
 \begin{tabular}{cccccccccccccc}
-$x!$& $=$ & $1$        & $\cdot 2$ &$\cdot 3$         &$\cdot 4$ & $\cdot 5$         & $\cdot 6$ & $\cdot 7$         & $\cdot 8$ & $\cdot 9$         & $\cdot 10$ & $\cdot \ldots$ \\
-    & $=$ & $\mathbf 1$&           &$\cdot \mathbf 3$ &          & $\cdot \mathbf 5$ &           & $\cdot \mathbf 7$ &           & $\cdot \mathbf 9$ &            & $\cdot \ldots$ \\
-    &     &            & $\dig{1}$ &                  &$\cdot 2$ &                   & $\dig 3$  &                   & $\cdot 2$ &                   & $\dig 5$   & $\cdot \ldots$ \\
-    &     &            &           &                  &$\dig 1$  &                   &           &                   & $\cdot 2$ &                   &            & $\cdot \ldots$ \\
-    &     &            &           &                  &          &                   &           &                   & $\dig 1$  &                   &            & $\cdot \ldots$ \\
-    &     & $\cdot \ldots$ &
+$x!$ & $=$ & $1$         & $\cdot 2$ & $\cdot 3$         & $\cdot 4$ & $\cdot 5$         & $\cdot 6$ & $\cdot 7$         & $\cdot 8$ & $\cdot 9$         & $\cdot 10$ & $\cdot \ldots$ \\
+     & $=$ & $\mathbf 1$ &           & $\cdot \mathbf 3$ &           & $\cdot \mathbf 5$ &           & $\cdot \mathbf 7$ &           & $\cdot \mathbf 9$ &            & $\cdot \ldots$ \\
+     &     &             & $\dig{1}$ &                   & $\cdot 2$ &                   & $\dig 3$  &                   & $\cdot 2$ &                   & $\dig 5$   & $\cdot \ldots$ \\
+     &     &             &           &                   & $\dig 1$  &                   &           &                   & $\cdot 2$ &                   &            & $\cdot \ldots$ \\
+     &     &             &           &                   &           &                   &           &                   & $\dig 1$  &                   &            & $\cdot \ldots$ \\
+     &     & $\cdot \ldots$ &
 \end{tabular}
-\\
+
+\medskip
+
 $\even x$ gets an easy formula: $\sum_{k=1}^\infty \floor{x / 2^k}$.
 For $\odd x$, we get a decomposition into a number of odd double factorials $k!! = 1 \cdot 3 \cdot 5 \cdot \ldots \cdot k$.
 
