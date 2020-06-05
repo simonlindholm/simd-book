@@ -470,7 +470,8 @@ prod %= mod;
 if (prod < 0) prod += mod;
 \end{lstlisting}
 
-This runs in 2.078s, which is worse than Barrett reduction. However, it's not completely useless -- we could possibly combine the two since integer and float operations use different circuitry, and the avoidance of \mbox{$64*64\rightarrow128$}-bit multiplications makes it more amenable to SIMD.
+This runs in 2.078s, which is worse than Barrett reduction.
+However, it's not completely useless -- it works with larger numbers, and the avoidance of \mbox{$64*64\rightarrow128$}-bit multiplications makes it more amenable to SIMD.
 
 \subsection{Montgomery multiplication}
 
@@ -515,16 +516,48 @@ Let us apply this to our program, as usual:
 const int PAR = 4;
 u32 subprod[PAR];
 rep(i,0,PAR) subprod[i] = 1;
-int iters = lim - cur;
+int reductions = lim - cur + PAR;
 ... parallel loop elided
 rep(i,0,PAR) prod = mont.redc((u64)prod * subprod[i]);
 for (; cur < lim; cur++) {
 	u32 cur2 = (u32)cur * pinv > plim ? cur : 1;
 	prod = mont.redc((u64)prod * cur2);
 }
-prod = prod * modpow(2, 32LL * (iters + PAR), mod) % mod;
+prod = prod * modpow(2, 32LL * reductions, mod) % mod;
 \end{lstlisting}
-This runs in 1.367s. That is again slightly worse than the Barrett reduction, but as with the floating-point modmul, the potential for SIMD is higher since there are no \mbox{$64*64\rightarrow128$}-bit multiplications.
+This runs in 1.367s.
+That is again slightly worse than the Barrett reduction, but as with the floating-point modmul, the potential for SIMD is higher since there are no \mbox{$64*64\rightarrow128$}-bit multiplications.
+
+\subsection{64-bit Montgomery multiplication}
+
+By changing the Montgomery multiplication to use 64-bit integers (and 128-bit ones within redc),
+we can multiply two numbers at a time into the accumulator.
+
+\begin{lstlisting}
+u64 invp2(u64 x) { ... }
+u64 Mont::redc(u128 a) { ... }
+...
+
+u64 subprod[PAR];
+while (cur + PAR * 2 <= lim) {
+  rep(j,0,PAR) {
+    u64 cur2 = (u32)cur * pinv > plim ? cur : 1;
+    subprod[j] = subprod[j] * cur2;
+    cur++;
+  }
+  rep(j,0,PAR) {
+    u64 cur2 = (u32)cur * pinv > plim ? cur : 1;
+    subprod[j] = mont.redc((u128)subprod[j] * cur2);
+    cur++;
+  }
+}
+\end{lstlisting}
+
+Unfortunately the divisibility checks start to get expensive here for some reason, and this does not represent a speedup over the previous version.
+(Previously removing the divisiblity checks made at most a \verb@~@5\% performance runtime.)
+With divisibility checks removed (\verb@cur2 = cur@) we get a runtime of 0.948s, and something like this should be achievable
+by special-casing different values of \verb@p@ and looping in different manners.
+I did not look into this, however.
 
 \subsection{Applying SIMD}
 
@@ -536,8 +569,11 @@ The relevant instructions that do exist are \verb@_mm_mullo_epi32@ (\mbox{$32*32
 We could potentially create a \mbox{$64*64\rightarrow128$}-bit multiplier out of these, but it would be hard without add-with-carry instructions, and it wouldn't be fast.
 
 On the other hand, both the float-based modular multiplication and the Montgomery multiplication are in principle easy to vectorize.
-The main annoyance comes from the fact that the divisibility check by $p$ starts to become a bottleneck, in comparison to the scalar code where it was only about a 5\% speed loss.
-Here is a SIMD version of the float-based modular multiplication:
+The main annoyance comes from the fact that, as with the 64-bit Montgomery, the divisibility check by $p$ starts to become a bottleneck.
+A fix for that which is relatively unintrusive (but unfortunately did not transfer well to the 64-bit Montgomery) is to keep a variable indicating the next number divisible by $p$ that we should skip over.
+We can then check in the inner loop whether we cross such a boundary, and if so correct for it.
+
+Here is a SIMD version of the float-based modular multiplication, which uses that trick:
 
 \begin{lstlisting}
 int cur = 0, nextp = 0; // nextp = p * ceil(cur / p)
@@ -611,7 +647,7 @@ if (prod < 0) prod += mod;
 \end{lstlisting}
 
 It runs in 0.728s on input that has $p$ as a large prime,
-and could go down to 0.656s if we managed to get rid of the number-skipping machinery.
+and could go down to 0.656s if we managed to get rid of the number-skipping machinery entirely.
 Setting \verb@mod@ to powers of 3, 5, 7, 11 we observe a very similar runtime, indicating that the reduced number of multiplications seems to make up for the complex code within the condition.
 
 The code uses AVX instructions, but no AVX2 ones.
@@ -629,7 +665,7 @@ rep(i,0,PAR) msubprod[i] = _mm256_set1_epi64x(1);
 mi mcur = _mm256_setr_epi64x(cur, cur + 1, cur + 2, cur + 3);
 mi mnpr = _mm256_set1_epi64x(mont.npr);
 mi mm = _mm256_set1_epi64x(mod);
-int iters = lim - cur;
+int reductions = lim - cur + 4 * PAR;
 
 while (nextp < cur) nextp += p;
 mi mnextp = _mm256_set1_epi64x(nextp - 1);
@@ -642,17 +678,8 @@ while (cur + maxStep <= lim) {
 		cur += 4;
 
 		if (nextp <= cur) {
-			// (32-bit compare is slightly faster than 64-bit)
-			mcur = _mm256_sub_epi32(mcur,
-			            _mm256_cmpgt_epi32(mcur, mnextp));
-			mnext = _mm256_add_epi64(mnext, _mm256_set1_epi64x(1));
-			mnextp = _mm256_add_epi64(mnextp, mp);
-			nextp += p;
-			cur++;
-			iters--;
-			if (p == 3) {
-				... same thing
-			}
+			reductions--;
+      ... as before, except with _mm256_..._epi64
 		}
 
 		mi ma = _mm256_mul_epu32(msubprod[j], mcur);
@@ -669,12 +696,7 @@ rep(i,0,PAR) {
 	rep(j,0,4)
 		prod = mont.redc((u64) prod * u.i[j]);
 }
-
-for (; cur < lim; cur++) {
-	u32 cur2 = (u32)cur * pinv > plim ? cur : 1;
-	prod = mont.redc((u64) prod * cur2);
-}
-prod = prod * modpow(2, 32LL * (iters + 4 * PAR), mod) % mod;
+...
 \end{lstlisting}
 
 This runs in 0.455s, or 0.423s without the number-skipping.
@@ -685,24 +707,27 @@ The following table summarizes the different versions:
 
 \vspace{1mm}
 \noindent
-\begin{tabular}{|l|c|}
+\begin{tabular}{|l|l|l|}
 \hline
-Algorithm & Time \\
+Algorithm & Time & Ideal time \\
 \hline
-Naive loop & 20.839s \\
-Optimized divisiblity test & 19.288s \\
-Parallel loop & 10.933s \\
-Barrett reduction & 2.122s \\
-Relaxed Barrett reduction & 1.246s \\
-Float-based & 2.078s \\
-Montgomery & 1.367s \\
-Float-based, SIMD & 0.728s \\
-Montgomery, SIMD & 0.455s \\
+Naive loop & 20.839s & 18.983s \\
+Optimized divisiblity test & 19.288s & 18.983s \\
+Parallel loop & 10.933s & 10.391s \\
+Barrett reduction & 2.122s & 1.612s \\
+Relaxed Barrett reduction & 1.246s & 1.195s \\
+Float-based & 2.078s & 1.983s \\
+Montgomery & 1.367s & 1.184s \\
+Montgomery, 64-bit & - & 0.948s \\
+Float-based, SIMD & 0.728s & 0.656s \\
+Montgomery, SIMD & 0.455s & 0.423s \\
 \hline
 \end{tabular}
 \vspace{1mm}
 
 \noindent
+Ideal time represents time with divisiblity check removed.
+
 In conclusion, relaxed Barrett reduction is a good default modular reduction algorithm.
 If higher performance is required, one can use vectorized versions to win a factor 2-3; either with
 Montgomery multiplication, which is fast but requires AVX2 and has a complex API, or with

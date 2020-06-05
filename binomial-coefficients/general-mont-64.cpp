@@ -1,3 +1,4 @@
+// This implementation cheats, and fails with --test. See the comment marked (*)
 #pragma GCC optimize ("O3")
 #include <bits/stdc++.h>
 using namespace std;
@@ -6,6 +7,7 @@ using namespace std;
 typedef long long ll;
 typedef uint32_t u32;
 typedef uint64_t u64;
+typedef __uint128_t u128;
 
 ll euclid(ll a, ll b, ll &x, ll &y) {
 	if (b) { ll d = euclid(b, a % b, y, x);
@@ -30,9 +32,9 @@ void factor(ll n, F f) {
 	if (n > 1) f(n, 1);
 }
 
-u32 invp2(u32 x) { // x^-1 mod 2^32
-	u32 xinv = 1;
-	rep(i,0,5) xinv = xinv * (2 - x * xinv);
+u64 invp2(u64 x) { // x^-1 mod 2^64
+	u64 xinv = 1;
+	rep(i,0,6) xinv = xinv * (2 - x * xinv);
 	return xinv;
 }
 
@@ -43,14 +45,14 @@ ll modpow(ll a, ll e, ll m) {
 }
 
 struct Mont {
-	u32 m, npr;
+	u64 m, npr;
 
-	Mont(u32 mod) : m(mod), npr(-invp2(mod)) {}
+	Mont(u64 mod) : m(mod), npr(-invp2(mod)) {}
 
-	u32 redc(u64 a) {
-		u32 b = (u32)a * npr;
-		u64 c = a + (u64)b * m;
-		return (u32)(c >> 32);
+	u64 redc(u128 a) {
+		u64 b = (u64)a * npr;
+		u128 c = a + (u128)b * m;
+		return (u64)(c >> 64);
 	}
 };
 
@@ -79,7 +81,7 @@ ll solve(ll N, ll K, int p, int a) {
 		}
 	}
 
-	u32 pinv = invp2(p);
+	u32 pinv = (u32) invp2(p);
 	u32 plim = 0xFFFFFFFF / p;
 
 	Mont mont(mod);
@@ -106,23 +108,30 @@ ll solve(ll N, ll K, int p, int a) {
 			}
 			prod = uprod % mod;
 		} else {
-			const int PAR = 4;
-			u32 subprod[PAR];
+			const int PAR = 8;
+			u64 subprod[PAR];
 			rep(i,0,PAR) subprod[i] = 1;
-			int reductions = lim - cur + PAR;
-			while (cur + PAR <= lim) {
+			int iters = lim - cur;
+			while (cur + PAR * 2 <= lim) {
+				// (*) cheating with the divisibility check, because I'm lazy
 				rep(j,0,PAR) {
-					u32 cur2 = (u32)cur * pinv > plim ? cur : 1;
-					subprod[j] = mont.redc((u64)subprod[j] * cur2);
+					u64 cur2 = cur; // (u32)cur * pinv > plim ? cur : 1;
+					subprod[j] = subprod[j] * cur2;
+					cur++;
+				}
+				rep(j,0,PAR) {
+					u64 cur2 = cur; // (u32)cur * pinv > plim ? cur : 1;
+					subprod[j] = mont.redc((u128)subprod[j] * cur2);
 					cur++;
 				}
 			}
-			rep(i,0,PAR) prod = mont.redc((u64) prod * subprod[i]);
+			rep(i,0,PAR) prod = mont.redc((u128) prod * subprod[i]);
 			for (; cur < lim; cur++) {
 				u32 cur2 = (u32)cur * pinv > plim ? cur : 1;
-				prod = mont.redc((u64) prod * cur2);
+				prod = mont.redc((u128) prod * cur2);
 			}
-			prod = prod * modpow(2, 32LL * reductions, mod) % mod;
+			int reductions = iters % (PAR * 2) + (iters / (PAR * 2) * PAR) + PAR;
+			prod = prod * modpow(2, 64LL * reductions, mod) % mod;
 		}
 		if (accMult > 0) res = res * modpow(prod, accMult, mod) % mod;
 		else resdiv = resdiv * modpow(prod, -accMult, mod) % mod;
