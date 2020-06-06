@@ -556,7 +556,7 @@ while (cur + PAR * 2 <= lim) {
 \end{lstlisting}
 
 Unfortunately the divisibility checks start to get expensive here for some reason, and this does not represent a speedup over the previous version.
-(Previously removing the divisiblity checks made at most a \verb@~@5\% performance runtime.)
+(Previously removing the divisibility checks made at most a \verb@~@5\% performance runtime.)
 With divisibility checks removed (\verb@cur2 = cur@) we get a runtime of 0.948s, and something like this should be achievable
 by special-casing different values of \verb@p@ and looping in different manners.
 I did not look into this, however.
@@ -714,7 +714,7 @@ The following table summarizes the different versions:
 Algorithm & Time & Ideal time \\
 \hline
 Naive loop & 20.839s & 18.983s \\
-Optimized divisiblity test & 19.288s & 18.983s \\
+Optimized divisibility test & 19.288s & 18.983s \\
 Parallel loop & 10.933s & 10.391s \\
 Barrett reduction & 2.122s & 1.612s \\
 Relaxed Barrett reduction & 1.246s & 1.195s \\
@@ -728,7 +728,7 @@ Montgomery, SIMD & 0.455s & 0.423s \\
 \vspace{1mm}
 
 \noindent
-Ideal time represents time with divisiblity check removed.
+Ideal time represents time with divisibility check removed.
 
 In conclusion, relaxed Barrett reduction is a good default modular reduction algorithm.
 If higher performance is required, one can use vectorized versions to win a factor 2-3; either with
