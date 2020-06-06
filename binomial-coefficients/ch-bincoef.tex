@@ -185,11 +185,13 @@ For each prime power $p^\alpha$, we decompose $N!$, $K!$ and $(N-K)!$ into power
 The product of a whole interval $[1, p^\alpha]$ is $1$ if $p = 2, \alpha \ge 3$, else $-1$,\footnote{
 This isn't really necessary to the implementation, since we could just as well compute the product of a whole interval using a brute-force loop. But it's a fun excuse to do math.
 
-If $\alpha = 1$, Wilson's theorem says that $(p-1)! = -1 \pmod{p}$, and has an easy proof: rearrange the product $1 \cdot 2 \cdot \ldots \cdot (p-1)$ to group $x$ together with $x^{-1}$; this will get rid of all factors except the ones that are their own inverse. Solving $x = x^{-1}$, or equivalently $x^2 = 1$, yields just two solutions $x = \pm 1$, and so $(p-1)! = 1 \cdot (-1) = -1\pmod{p}$. An easy way of seeing that there aren't more solutions to $x^2 = 1$ is that a degree two polynomial can only have two roots.
+If $\alpha = 1$, Wilson's theorem says that $(p-1)! = -1 \pmod{p}$, and has an easy proof: rearrange the product $1 \cdot 2 \cdot \ldots \cdot (p-1)$ to group $x$ together with $x^{-1}$; this will get rid of all factors that are not their own inverse. Solving $x = x^{-1}$, or equivalently $x^2 = 1$, yields just two solutions $x = \pm 1$, and so $(p-1)! = 1 \cdot (-1) = -1\pmod{p}$. An easy way of seeing that there aren't more solutions to $x^2 = 1$ is that a degree two polynomial can only have two roots.
 
 For $p = 2$ we can compute the results for $\alpha = 2, 3$ by hand: $\alpha = 2$ gives a product $1 \cdot 3 = -1$, and $\alpha = 3$ gives $1 \cdot 3 \cdot 5 \cdot 7 = 1$. For larger $\alpha$ we can use the Wilson argument together with induction on the fact that $x^2 = 1$ has four solutions $1$, $-1$, $2^{\alpha-1} - 1$, $2^{\alpha-1} + 1$.
 
 For $p > 2$ we can solve $x^2 = 1 \pmod{p^\alpha}$ using Hensel lifting: a root $x$ to the polynomial mod $p$ lifts to exactly one corresponding root mod higher powers of $p$ since the derivative $2x$ is non-zero for $p > 2$. Hence, $\pm 1$ are the only roots to $x^2 = 1 \pmod{p^\alpha}$, and we can apply the Wilson argument.
+
+For an easier argument we could also factor $x^2-1$ as $(x+1)(x-1)$ and look at what $x\pm 1$ being divisible by a power of $p$ means for $x\mp 1$.
 }
 so we can look only at ranges with upper bound less than $p^\alpha$.
 Here's an initial attempt:
