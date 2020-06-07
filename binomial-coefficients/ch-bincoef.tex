@@ -290,7 +290,7 @@ void test() {
 }
 \end{lstlisting}
 
-Runtime is an abysmal 20.839s, but it works.
+Runtime is an abysmal 20.839s on worst-case input $n=999999935$, $m=999999937$, but it works.
 Let us focus on the innermost loop:
 \begin{lstlisting}
 for (; cur < lim; cur++) {
@@ -356,13 +356,13 @@ for (; cur < lim; cur++) {
 \end{lstlisting}
 
 This gives us a (still pretty awful) runtime of 11.848s.
-Making the divisibility check branchless by doing
+Rewriting the divisibility check as
 \begin{lstlisting}
 subprod[i] * ((u32)cur * pinv > plim ? cur : 1) % mod;
 \end{lstlisting}
-improves it further to 10.933s (10.391s with no divisibility check at all).
+apparently improves it further to 10.933s; removing it entirely gives 10.391s.
 Raising \verb@PAR@ further makes performance worse, and turning on -O3 makes no difference.
-Newer processor architectures are somewhat faster at division than the Haswell I'm benchmarking on, but even with a judge running on ultra-modern hardware we would be pretty far from the 1 second goal.
+Newer Intel processors are somewhat faster at division than the Haswell I'm benchmarking on, but even with a judge running on ultra-modern hardware we would be pretty far from the 1 second goal.
 
 So... where do we go from here?
 We can't turn to SIMD, because there's no SIMD integer division or modulo instruction.
