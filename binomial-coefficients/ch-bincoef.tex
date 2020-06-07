@@ -360,7 +360,7 @@ Rewriting the divisibility check as
 \begin{lstlisting}
 subprod[i] * ((u32)cur * pinv > plim ? cur : 1) % mod;
 \end{lstlisting}
-apparently improves it further to 10.933s; removing it entirely gives 10.391s.
+turns out to improve it further to 10.933s; removing it entirely gives 10.391s.
 Raising \verb@PAR@ further makes performance worse, and turning on -O3 makes no difference.
 Newer Intel processors are somewhat faster at division than the Haswell I'm benchmarking on, but even with a judge running on ultra-modern hardware we would be pretty far from the 1 second goal.
 
